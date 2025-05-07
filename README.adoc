@@ -1,0 +1,15 @@
+= OSX Tools
+
+== TimeMachine Simplified 
+
+TimeMachine Simplified is a file backup tool.
+
+=== Requirements
+Target backup volume file systems supports hard links.
+
+=== Usage
+
+```
+backup_volume=/Volumes/Backup
+tms src_dir [full]
+```
