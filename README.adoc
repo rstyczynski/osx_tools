@@ -13,3 +13,6 @@ Target backup volume file systems supports hard links.
 backup_volume=/Volumes/Backup
 tms src_dir [full]
 ```
+
+=== Limitations
+Does not support file removal. Deleted files are not recognized.
