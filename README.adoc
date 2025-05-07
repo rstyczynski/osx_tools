@@ -4,15 +4,15 @@
 
 TimeMachine Simplified is a file backup tool. Supports full and incremental copies.
 
-=== Requirements
-Target backup volume file systems supports hard links.
-
 === Usage
 
 ```
 backup_volume=/Volumes/Backup
 tms src_dir [full]
 ```
+
+=== Requirements
+Target backup volume file systems supports hard links.
 
 === Limitations
 Does not support file removal. Deleted files are not recognized.
