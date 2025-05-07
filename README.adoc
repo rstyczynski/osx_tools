@@ -7,6 +7,8 @@ TimeMachine Simplified is a file backup tool. Supports full and incremental copi
 === Usage
 
 ```
+source tms.sh
+
 backup_volume=/Volumes/Backup
 tms src_dir [full]
 ```
