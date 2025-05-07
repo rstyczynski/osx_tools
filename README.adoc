@@ -2,7 +2,7 @@
 
 == TimeMachine Simplified 
 
-TimeMachine Simplified is a file backup tool.
+TimeMachine Simplified is a file backup tool. Supports full and incremental copies.
 
 === Requirements
 Target backup volume file systems supports hard links.
