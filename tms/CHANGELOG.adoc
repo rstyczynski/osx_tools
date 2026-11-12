@@ -1,0 +1,45 @@
+= Changelog
+
+== 1.5 — 2026-11-12
+
+* Add explicit `tms --scheduler on|off|status` controls with persistent launchd enable/disable state and actual schedule/next-run reporting.
+* Add independent `tms --swiftbar on|off|status` controls; preserve unrelated plugins.
+* Add `tms --access setup|status` for guided Full Disk Access setup and an automated check under the native background app identity.
+* Include scheduler state, configured hours/timezone, next run, and wake behavior in email reports and the menu.
+* Make setup reusable: preserve config, take destination from the current environment, and stop rewriting the login profile or embedding a personal recipient.
+* Add lifecycle regression tests and document the manual macOS privacy grant step by step.
+
+== 1.4 — 2026-11-12
+
+* Add a native four-hour per-user launchd LaunchAgent with wake catch-up; remove the legacy TMS cron entry while preserving unrelated jobs.
+* Add a noninteractive `--all` wrapper with kernel locking, private logs, persistent status, and final-summary emails through configured Apple Mail.
+* Configure `TMS_REPORT_EMAIL` in the Bash login profile; keep the automation destination in a separate JSON config.
+* Add SwiftBar status and backup-now actions for all sources or one source, plus summary/log shortcuts.
+* Add a dedicated TMS Backup launcher app for scoped macOS privacy permission.
+* Add setup email checks, temporary-fixture service tests, and installation/removal documentation.
+
+== 1.3 — 2026-11-12
+
+* Add read-only `tms --sources`: one row per known source with state, allocated size, regular-file count, and last successful backup.
+* Add a final report with one row per source: status, changed files, backup type, elapsed seconds, and snapshot or failure/skip reason.
+* Combine reports for `tms --all` and configuration-file `tms_batch` runs; standalone backups get a one-row report.
+* Count transferred regular files using rsync statistics, and retain the statistics beside each snapshot.
+* Preserve copy failure status through progress logging; unavailable file counts display as a dash.
+* Preserve spaces and quotes in configuration-file source paths when trimming whitespace.
+
+== 1.2 — 2026-11-12
+
+* Separate each source's output with a visible divider and a source/destination header, including skipped entries.
+* Add `tms --all` to run sequential backups of sources known at the destination.
+* Bare `tms` now displays help without starting backups.
+* Add `--help` (`-h`) and `--version`; reject unknown options and invalid backup arguments.
+* Display the effective `backup_volume` when invoked.
+* Record original source paths in `.source`; recover paths from legacy snapshots.
+* Continue batch runs after missing or unrecognizable sources, with a summary and failure status.
+* Preserve `latest` on copy failure, reject snapshot collisions, and retain hidden files when linking snapshots.
+* Document setup, commands, destination layout, restore behavior, and file-based batch configuration.
+* Add temporary-fixture regression tests for explicit and discovered sources and option handling.
+
+== 1.1
+
+* Existing full and incremental backups, restore function, and configuration-file batch command.

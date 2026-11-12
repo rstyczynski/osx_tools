@@ -1,0 +1,242 @@
+= TimeMachine Simplified (tms)
+
+Version 1.5. Bash functions for full and incremental directory backups.
+
+== Setup
+
+Requires Bash 3.2 or newer, GNU coreutils (`gcp` and `realpath`), and a modern
+rsync supporting `--info=progress2`. On macOS:
+
+[source,bash]
+----
+brew install coreutils rsync
+source ~/projects/osx_tools/tms/tms.sh
+backup_volume=/Volumes/Backup
+----
+
+Keep the source command and destination setting in the interactive section of
+`~/.bashrc`. Ensure the Homebrew tools are on `PATH`.
+The destination filesystem must support hard links and symbolic links.
+If unset, `backup_volume` defaults to `/Volumes/Backup`.
+
+== Commands
+
+[source,bash]
+----
+tms                         # Show help and current backup_volume; no backup
+tms --help
+tms --version
+tms ~/Documents             # First full backup, then incremental snapshots
+tms ~/Documents full        # Force a full snapshot
+tms --all                   # Back up all sources already known at this destination
+tms --sources               # List known sources, states, sizes, files, and last backup
+----
+
+Every invocation displays the effective `backup_volume`.
+Each source has a visible divider and a header showing its path and destination.
+After completion, a final report has one row per source: source path, status
+(`OK`, `FAILED`, or `SKIPPED`), changed files, backup type, elapsed seconds,
+and snapshot name or failure/skip note. Batch runs print one combined report.
+Changed files means regular files actually transferred by rsync; a full backup
+counts all transferred regular files. A dash means the count is unavailable.
+On a failed transfer, any reported count is partial. Transfer statistics are
+retained beside the snapshot in `<timestamp>[.full].stats`.
+`--all` is explicit: merely running `tms` never starts a batch backup.
+`--all` takes no additional arguments and runs each source sequentially.
+Missing or unrecognizable sources are reported; the other sources still run.
+The command returns nonzero if any source fails or is skipped, or no sources are known.
+
+=== Source inventory
+
+`tms --sources` prints one row per destination label with its original source,
+state, size, regular-file count, and last successful backup (`latest`). It does
+not start backups or change snapshots. Source discovery also supports legacy
+snapshots without `.source` metadata.
+
+States are `READY`, `MISSING`, `UNKNOWN` (original path cannot be recovered),
+`NO-BACKUP` (source exists but there is no successful `latest` snapshot), and
+`UNREADABLE` (size or file enumeration failed). Unavailable fields show `-`.
+Size is allocated source disk usage from `du`, expressed in KiB/MiB/GiB;
+file counts include regular files. Scans do not follow symbolic links and may
+take time on large directory trees. The inventory command succeeds even when
+rows show unavailable sources; a missing backup root is an error.
+
+== Destination layout and discovery
+
+Snapshots live in `backup_volume/backup/<source-basename>/<timestamp>[.full]`.
+Each snapshot preserves the absolute source path below its root.
+`latest` points to the last successful snapshot. Failed copies do not advance it.
+Snapshots created within the same second cannot overwrite an existing snapshot.
+
+Successful backups record their absolute source path in the label's `.source` file.
+For older backups, `--all` recovers that path from `latest`, or a timestamped
+snapshot if `latest` is absent. Empty or ambiguous layouts are skipped.
+If a recorded source has moved, it is reported as missing.
+Labels with `.source` metadata reject a different source with the same basename.
+Use distinct basenames for different backup sources.
+
+Incremental snapshots retain files deleted from the source; deletions are not
+mirrored. Inspect the chosen snapshot when selecting files to restore.
+
+== Restore
+
+[source,bash]
+----
+tms_restore Documents 2026-11-12T130000.full /Volumes/Data/Restore
+----
+
+The restore directory must not already exist. The selected snapshot is copied
+into that directory, retaining its stored absolute-path tree.
+
+== File-based batch configuration
+
+The existing `tms_batch [config_file]` command remains available.
+It reads source directories, one per line, from `~/etc/tms_config` by default.
+Blank lines and lines beginning with `#` are ignored. Relative paths are resolved
+from the current working directory. Use `tms --all` for destination-based discovery.
+
+== Verification
+
+Run `bash test-tms.sh` from this directory. Tests create temporary fixtures and
+never operate on your configured backup destination.
+
+
+== macOS scheduler, SwiftBar, and access controls (1.5)
+
+All setup is scripted and requires explicit arguments. First load the functions:
+
+[source,bash]
+----
+source ~/projects/osx_tools/tms/tms.sh
+
+# Native launchd schedule; independent of SwiftBar:
+tms --scheduler status       # Also the default for --scheduler; --scheduler check is an alias
+tms --scheduler on
+tms --scheduler off
+
+# Menu-bar plugin; does not enable or disable the scheduler:
+tms --swiftbar status
+tms --swiftbar on
+tms --swiftbar off
+
+# Prepare the TMS app, open the privacy panel, and print exact grant instructions:
+tms --access setup
+# Verify real background access under the TMS app identity (no backup/email):
+tms --access status
+----
+
+`on` and `off` are idempotent. Scheduler status is read-only. SwiftBar status
+means the TMS plugin symlink is installed; SwiftBar itself must be running to
+show it. `--swiftbar on` opens the existing SwiftBar app and installs the plugin
+in its configured directory. `off` removes only TMS's own symlink, preserving
+other plugins, snapshots, logs, and configuration. The typo `--switfbar` is
+accepted as an alias. Status also accepts `check`.
+
+The compatibility script `python3 install-service.py scheduler on` exposes the
+same controls. Running it without a feature/action does not install anything.
+Turning the scheduler on does not install SwiftBar; turning SwiftBar on does
+not enable the schedule. Setup preserves existing user configuration and does
+not rewrite `.bash_profile` or embed a recipient address.
+
+=== Native schedule
+
+The per-user LaunchAgent `local.tms.backup` runs at 00:00, 04:00, 08:00, 12:00,
+16:00, and 20:00 in the Mac's local timezone. `StartCalendarInterval` catches up
+once on wake if the machine slept through a scheduled time. The user must be
+logged in; jobs missed while powered off do not catch up. No cron job is used.
+
+`tms --scheduler on` builds the helper if needed, writes the LaunchAgent,
+enables it, and loads it without immediately starting a backup. `off` persists
+launchd's disabled state across reboots and unloads the job. If a scheduled
+backup is currently running, changes are refused until it finishes so no
+backup is interrupted. Manual backup-now actions remain available while the
+scheduler is off. Status reports enabled/disabled, loaded/runtime state, actual
+configured hours and timezone, the next expected run, and the plist path.
+
+The agent is stored at `~/Library/LaunchAgents/local.tms.backup.plist` and the
+launcher at `~/Applications/TMS Backup.app`. The launcher is built from
+`TMSBackup.swift` and ad-hoc signed locally; no software is downloaded. Unchanged
+launchers are retained so repeated `on` commands preserve their privacy identity.
+
+=== Full Disk Access: one manual macOS grant
+
+macOS does not permit a normal script to grant Full Disk Access. TMS automates
+building the dedicated app, opening the correct settings panel and Finder, and
+verifying access; the final privacy grant must be made by the user:
+
+. Run `tms --access setup`.
+. In System Settings -> Privacy & Security -> Full Disk Access, click *+*.
+  Authenticate if macOS requests it.
+. Press *Command-Shift-G*, enter `~/Applications/TMS Backup.app`, and add it.
+  Alternatively, drag the app from the Finder window into the access list.
+. Turn the *TMS Backup.app* switch *ON*. Do not grant Bash, Python, or cron access.
+. Run `tms --access status`. Expect *READABLE* for Documents, the destination,
+  and all known source directories, followed by *Access check: PASS*.
+
+The access check uses a temporary native LaunchAgent with the actual TMS app
+identity, reads directory metadata only, and removes the test agent afterward.
+It does not run backups or send emails. Missing sources also cause a failed
+check and are named in its output. If the app is rebuilt or the repository is
+moved, rerun the check and renew the grant if macOS requires it. If prompted,
+allow TMS Backup to control Mail for report submission as well.
+
+=== Destination and email
+
+New configuration defaults to the current `backup_volume` when enabling from
+`tms`, or `/Volumes/Backup` if none is set. It is saved in
+`~/.config/tms/config.json`; existing files are preserved. Set `backup_volume`
+there for future background runs, and optionally `mail_from` for the sender.
+
+Add your report recipient to the noninteractive login environment:
+
+[source,bash]
+----
+# In ~/.bash_profile:
+export TMS_REPORT_EMAIL="you@example.com"
+----
+
+`tms-run.sh --all` loads `.bash_profile`, explicitly sources `tms.sh`, and runs
+`tms --all`. It never sources interactive `.bashrc`. It also accepts
+`--source /absolute/path` for a single source. A kernel file lock prevents two
+wrapper runs from overlapping and releases on exit or crash. Direct calls to
+`tms` bypass the wrapper lock.
+
+Each completed run submits its final per-source summary through the already
+configured Apple Mail account. No SMTP passwords are stored by TMS. Emails
+include scheduler enabled/loaded/runtime state, configured hours/timezone,
+next expected run, and wake behavior, even for manual runs while scheduling is
+disabled. Failures and missing final reports are emailed too. A Mail submission
+confirms queuing, not delivery. The logged-in user's account and Automation
+permission must be available; this is not a pre-login email service.
+
+For an explicit setup email without running backups:
+
+[source,bash]
+----
+~/Applications/"TMS Backup.app"/Contents/MacOS/TMSBackup --test-email
+----
+
+=== Menu and logs
+
+SwiftBar refreshes every minute. It shows running/success/failure state, last-run
+time, actual scheduler status, mail status, destination, and last-backup timestamps.
+Use *Back up all now* or a source's *Back up now* submenu. Other actions open the
+saved summary and logs. Source paths and timestamps are cached after each wrapper
+run or setup test, so SwiftBar does not need Full Disk Access itself.
+
+Logs and emailed summaries are private files under `~/Library/Logs/tms/`; status,
+cached sources, and the latest summary are under `~/Library/Application Support/tms/`.
+Logs are retained until manually removed. Inspect `launchd-error.log` and menu
+mail status if a background run fails. `/usr/bin/python3`, Swift tools for the
+initial helper build, existing SwiftBar, and configured Apple Mail are required.
+
+To stop automatic operation, run `tms --scheduler off` and `tms --swiftbar off`.
+The helper, access grant, snapshots, settings, and logs remain for reuse.
+
+=== Service tests
+
+`python3 -B test-manage.py` tests independent on/off/status transitions and
+background-check cleanup with mocked macOS commands. `python3 -B test-service.py`
+tests wrapper backups, summaries with scheduler status, cached menu actions,
+locking, and email error reporting using temporary sources and mocked mail.
+Neither test suite touches the real scheduler or sends email.

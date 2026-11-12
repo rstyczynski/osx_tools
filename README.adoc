@@ -2,7 +2,9 @@
 
 == TimeMachine Simplified 
 
-TimeMachine Simplified is a file backup tool. Supports full and incremental copies.
+TimeMachine Simplified is a file backup tool. Supports full and incremental copies, with a final report showing one row per source.
+
+Version 1.5. See link:tms/README.adoc[the tms README] and link:tms/CHANGELOG.adoc[changelog].
 
 === Usage
 
@@ -11,6 +13,12 @@ source tms.sh
 
 backup_volume=/Volumes/Backup
 tms src_dir [full]
+tms --all          # Back up existing sources discovered at the destination
+tms --sources      # List source state, size, files, and last successful backup
+tms --scheduler on|off|status
+tms --swiftbar on|off|status
+tms --access setup|status
+tms --version
 ```
 
 === Requirements
@@ -18,3 +26,7 @@ Target backup volume file systems supports hard links.
 
 === Limitations
 Does not support file removal. Deleted files are not recognized.
+
+
+TMS also supports four-hour native launchd scheduling, SwiftBar menu actions, and emailed
+per-source summaries. See link:tms/README.adoc[the service setup documentation].
