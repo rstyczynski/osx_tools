@@ -1,0 +1,9 @@
+# TMS central defaults. Directory names match at any depth.
+# Add ! before a pattern to keep it. Last matching rule wins.
+# Project-specific exceptions belong in .tmsignore.
+.build/
+.models/
+.terraform/
+.cache/
+hf-cache/
+supertonic-cache/

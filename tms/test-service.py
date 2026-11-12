@@ -37,6 +37,16 @@ class ServiceTest(unittest.TestCase):
         self.assertTrue(all(p == positions[0] for p in positions))
         self.assertEqual(service.email_body("No final table\nError: unavailable\n"), "No final table\nError: unavailable\n")
 
+    def test_email_table_includes_excluded_count(self):
+        summary = ("TMS backup report\nFINAL BACKUP REPORT\n"
+                   "SOURCE | STATUS | CHANGED | EXCLUDED | TYPE | SECONDS | SNAPSHOT / NOTE\n"
+                   "/Users/example/project | OK | 3 | 12 | incremental | 2 | snapshot\n"
+                   "Total: 1 | OK: 1 | FAILED: 0 | SKIPPED: 0\n")
+        body = service.email_body(summary)
+        self.assertIn("EXCLUDED", body)
+        row = next(line for line in body.splitlines() if line.startswith("project "))
+        self.assertEqual([part.strip() for part in row.split("|")][3], "12")
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="tms-service-", dir="/tmp")
         self.addCleanup(self.temp.cleanup)

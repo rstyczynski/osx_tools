@@ -16,13 +16,18 @@ class ManagementTest(unittest.TestCase):
     def setUp(self):
         temporary = tempfile.TemporaryDirectory(prefix="tms-manage-", dir="/tmp")
         self.addCleanup(temporary.cleanup)
-        self.home = Path(temporary.name)
+        self.home = Path(temporary.name).resolve()
+        self.repository = self.home / "repository"
+        self.repository.mkdir()
+        (self.repository / "tms.1m.sh").write_text("#!/bin/bash\n")
+        (self.repository / "excludes.default").write_text((manage.ROOT / "excludes.default").read_text())
         self.loaded, self.disabled = False, False
         self.calls = []
         self.helper = self.home / "Applications/TMS Backup.app/Contents/MacOS/TMSBackup"
         self.helper.parent.mkdir(parents=True)
         self.helper.touch()
         for item in (patch.object(manage, "HOME", self.home),
+                     patch.object(manage, "ROOT", self.repository),
                      patch.object(manage, "command", side_effect=self.command),
                      patch.object(manage, "build_helper", return_value=self.helper)):
             item.start()
@@ -92,6 +97,14 @@ class ManagementTest(unittest.TestCase):
         self.assertFalse(list(state.glob("access-*.plist")))
         self.assertFalse(list(state.glob("access-*.json")))
         self.assertTrue(any(call[1] == "bootout" for call in self.calls if call[0] == "/bin/launchctl"))
+
+    def test_central_policy_created_once_and_user_edits_preserved(self):
+        manage.prepare()
+        policy = self.home / ".config/tms/excludes"
+        self.assertIn(".models/", policy.read_text())
+        policy.write_text("")
+        manage.prepare()
+        self.assertEqual(policy.read_text(), "")
 
 
 if __name__ == "__main__":

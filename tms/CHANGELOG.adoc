@@ -1,5 +1,15 @@
 = Changelog
 
+== 1.6.0 — 2026-11-12
+
+* Add central exclusions at `~/.config/tms/excludes` and nested project `.tmsignore` overrides, with last-match-wins include exceptions.
+* Add `tms --explain PATH [--source ROOT]` showing the selected context, matching rule, and origin.
+* Filter full backups and the newly cloned incremental tree; preserve source files and older snapshot entries.
+* Count excluded files in per-source terminal and email reports; preserve compatibility with older six-column email reports.
+* Save active policy text in `.rules.json` sidecars and carry policy metadata into restore output.
+* Use NUL-delimited manifests and capture new included empty directories and unchanged files newly re-included by policy.
+* Add temporary-fixture rule, incremental, restore, and email regression tests. The previously documented content quick-check and shared historical-metadata bugs remain.
+
 == 1.5.1 — 2026-11-12
 
 * Document the verified metadata/restore limitations and two outstanding incremental-backup correctness bugs: skipped same-size/same-mtime content changes and shared historical snapshot metadata. No backup behavior is changed by this documentation update.

@@ -41,6 +41,13 @@ def prepare():
     for path in (HOME / ".config/tms", HOME / "Library/Logs/tms", HOME / "Library/Application Support/tms"):
         path.mkdir(parents=True, exist_ok=True)
         path.chmod(0o700)
+    exclusions = HOME / ".config/tms/excludes"
+    try:
+        with exclusions.open("x") as stream:
+            stream.write((ROOT / "excludes.default").read_text())
+        exclusions.chmod(0o600)
+    except FileExistsError:
+        pass  # Preserve the user's central policy, including an intentionally empty file.
     config = HOME / ".config/tms/config.json"
     if not config.exists():
         data = {"backup_volume": os.environ.get("TMS_BACKUP_VOLUME") or os.environ.get("backup_volume") or "/Volumes/Backup"}
@@ -69,7 +76,7 @@ def build_helper():
     command(["/usr/bin/swiftc", "-O", str(ROOT / "TMSBackup.swift"), "-o", str(binary)], check=True)
     info = {"CFBundleIdentifier": "local.tms.helper", "CFBundleName": "TMS Backup",
             "CFBundleDisplayName": "TMS Backup", "CFBundleExecutable": "TMSBackup",
-            "CFBundlePackageType": "APPL", "CFBundleVersion": "1.5", "LSUIElement": True,
+            "CFBundlePackageType": "APPL", "CFBundleVersion": "1.6.0", "LSUIElement": True,
             "NSAppleEventsUsageDescription": "TMS sends your backup summary using your configured Mail account.",
             "TMSRunnerPath": str(ROOT / "tms-run.sh")}
     info_path.write_bytes(plistlib.dumps(info))

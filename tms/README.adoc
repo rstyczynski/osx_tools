@@ -1,10 +1,10 @@
 = TimeMachine Simplified (tms)
 
-Version 1.5.1. Bash functions for full and incremental directory backups.
+Version 1.6.0. Bash functions for full and incremental directory backups.
 
 == Setup
 
-Requires Bash 3.2 or newer, GNU coreutils (`gcp` and `realpath`), and a modern
+Requires Bash 3.2 or newer, Python 3.9+ at `/usr/bin/python3`, GNU coreutils (`gcp` and `realpath`), and a modern
 rsync supporting `--info=progress2`. On macOS:
 
 [source,bash]
@@ -30,12 +30,13 @@ tms ~/Documents             # First full backup, then incremental snapshots
 tms ~/Documents full        # Force a full snapshot
 tms --all                   # Back up all sources already known at this destination
 tms --sources               # List known sources, states, sizes, files, and last backup
+tms --explain ~/project/.models/weights.bin --source ~/project
 ----
 
 Every invocation displays the effective `backup_volume`.
 Each source has a visible divider and a header showing its path and destination.
 After completion, a final report has one row per source: source path, status
-(`OK`, `FAILED`, or `SKIPPED`), changed files, backup type, elapsed seconds,
+(`OK`, `FAILED`, or `SKIPPED`), changed files, excluded files, backup type, elapsed seconds,
 and snapshot name or failure/skip note. Batch runs print one combined report.
 Changed files means regular files actually transferred by rsync; a full backup
 counts all transferred regular files. A dash means the count is unavailable.
@@ -60,6 +61,106 @@ Size is allocated source disk usage from `du`, expressed in KiB/MiB/GiB;
 file counts include regular files. Scans do not follow symbolic links and may
 take time on large directory trees. The inventory command succeeds even when
 rows show unavailable sources; a missing backup root is an error.
+
+== Central exclusions and local overrides (1.6.0)
+
+The central policy is `~/.config/tms/excludes`. It contains one rule per line.
+Installation/explicit setup creates this file only if missing; user edits and
+intentionally empty files are preserved. If the file is missing, TMS reads the
+bundled `excludes.default` with the same defaults:
+
+[source,text]
+----
+.build/
+.models/
+.terraform/
+.cache/
+hf-cache/
+supertonic-cache/
+----
+
+Only directories with these names and their descendants are excluded. There is
+no broad `*cache` rule, no automatic use of `.gitignore`, and no default exclusion
+for Git history, Terraform state files, recordings, or arbitrary `local-data`.
+Excluding `.terraform/` skips its local initialization/backend metadata as well
+as provider downloads; keep actual state files and dependency lockfiles backed up.
+Use `TMS_EXCLUDES_FILE=/absolute/path` to select a different central policy.
+
+=== Local rules and precedence
+
+Place `.tmsignore` in a project or subdirectory. Rules are data, never shell code.
+TMS applies central rules first, then local files from ancestor directories down
+to the entry's parent directory. The last matching rule wins. Sibling projects'
+local rules do not affect one another.
+
+[source,text]
+----
+# Additional exclusions in this project:
+generated-downloads/
+temporary-exports/
+
+# Keep a locally trained model despite the central .models rule:
+!/.models/my-trained-model/
+
+# Or use !/.models/ to keep the whole directory.
+----
+
+* `!` means include; a normal rule means exclude. Blank lines and `#` comments are ignored.
+* Rules are case-sensitive. Names without `/` match at any depth beneath the rule file.
+* A leading `/`, or a pattern containing `/`, anchors the match to that rule file's directory.
+  Central anchored paths are relative to the selected backup source root.
+* A trailing `/` restricts a rule to directories and their descendants; it does not exclude a same-named ordinary file.
+* `*`, `?`, and character classes match within one path component; a `**` component matches zero or more directory levels.
+* Escape an initial `#` or `!` with a backslash for a literal filename. Surrounding rule whitespace is trimmed.
+* Excluded parents are still traversed to discover nested overrides. Necessary parent
+  directories are retained for explicitly included descendants.
+* The explicitly selected source root, `.tmsignore` files, and the central rules
+  file when within the source are always retained, even if a rule would exclude them.
+
+The filter examines filesystem metadata, not file contents. Finding nested rules
+and counting excluded entries still requires walking excluded directory trees;
+large build caches can therefore take time to scan even though their data is not copied.
+
+=== Explain a decision
+
+[source,bash]
+----
+tms --explain ~/project/.models/my-trained-model/weights.bin --source ~/project
+----
+
+This read-only command prints INCLUDED/EXCLUDED, source root, the winning rule,
+and its configuration file and line number. If `--source` is omitted, TMS chooses
+its longest matching registered `.source` root, then a containing Git root, then
+a containing `.tmsignore` directory, then the path's directory. The chosen root
+is printed; use `--source` to reproduce a particular backup context exactly.
+An excluded directory may still exist structurally to contain included descendants.
+
+=== Incremental snapshots, counts, and policy recovery
+
+Rules apply to full, incremental, single-source, configuration-file batch,
+`--all`, scheduled, and menu-triggered backups. A newly excluded entry carried
+from the previous snapshot is unlinked only from the new snapshot. Source files
+and entries in older snapshots are not deleted. Existing snapshots do not shrink.
+A newly included unchanged file is copied if it is absent from the new snapshot.
+New included empty directories are also captured.
+
+`EXCLUDED` counts unique excluded non-directory paths found in the current source
+or removed from the new carried snapshot; a path present in both is counted once.
+The value is shown per source in terminal and email reports. It is a path count,
+not bytes saved or the number of directories. A dash means the scan did not finish.
+
+Each successful snapshot has a NUL-delimited `<timestamp>[.full].files0` manifest
+and a `<timestamp>[.full].rules.json` sidecar with the full active central/local
+configuration text, origins, and counts. NUL delimiters support embedded newlines
+in filenames. `.tmsignore` files in the source are also included in the file tree.
+`tms_restore` copies the sidecar to `tms-exclusions.json` in the new restore
+location. Consult it to recover the central/ancestor rules; restoration does not
+overwrite your currently active policy automatically.
+
+Unreadable directories/configuration and malformed rules fail the backup rather
+than silently omitting data, and do not advance `latest`. The backup destination
+must be outside the source directory. Rules do not rewrite or remove excluded
+files that are already stored as objects in Git history.
 
 == Destination layout and discovery
 
@@ -91,10 +192,11 @@ into that directory, retaining its stored absolute-path tree.
 [[limitations]]
 == Limitations and known correctness bugs
 
-The following behavior was checked on macOS with GNU rsync 3.4.1 on 2026-11-12,
-using temporary files through full backup, restore, and incremental backup cycles.
-The audit did not change production backups. These limitations and bugs remain
-present in version 1.5.1; documenting them does not fix the implementation.
+The following metadata behavior and correctness bugs were checked on macOS with
+GNU rsync 3.4.1 on 2026-11-12 using temporary full-backup, restore, and incremental
+cycles. The two correctness bugs remain in version 1.6.0. Version 1.6.0 adds
+policy filtering and captures new included empty directories; it does not repair
+historical metadata or the rsync content quick-check bug.
 
 === Metadata fidelity
 
@@ -128,12 +230,11 @@ Metadata omitted during backup cannot be recovered merely by changing restore op
 
 * *Deletions are not mirrored.* A file deleted from the source remains in later
   incremental snapshots. A snapshot can therefore contain files no longer in the source.
-* *New empty directories are omitted from incremental backups.* Incremental
-  discovery selects regular files only. Directory-only metadata changes are
-  likewise outside that manifest.
+* *Existing directory-only metadata changes can be missed by incremental selection.*
+  New included directories are captured, but an existing directory is not selected
+  solely because its metadata changed.
 * *Symbolic links are dereferenced.* Backup uses `--copy-links`; the restored
   test symlink was an ordinary file containing its target's data, not a symlink.
-  Incremental discovery does not track symlink entries themselves.
 * *Original hard-link relationships are lost.* Two source filenames sharing
   one inode were restored as independent files. Hard links used between TMS
   snapshots are a separate storage optimization.
@@ -144,7 +245,7 @@ Metadata omitted during backup cannot be recovered merely by changing restore op
 
 === Known correctness bugs
 
-* *Changed contents can be missed.* Incremental discovery uses `ctime`, but
+* *Changed contents can be missed.* Existing regular-file discovery uses `ctime`, but
   rsync subsequently uses its default size/mtime quick check. A same-length edit
   with the original modification date restored was selected for processing yet
   skipped by rsync: the source contained the new text while the new backup
@@ -318,3 +419,6 @@ background-check cleanup with mocked macOS commands. `python3 -B test-service.py
 tests wrapper backups, summaries with scheduler status, cached menu actions,
 locking, and email error reporting using temporary sources and mocked mail.
 Neither test suite touches the real scheduler or sends email.
+
+Run `python3 -B test-excludes.py` for rule precedence, snapshot filtering, override
+re-inclusion, filename handling, policy recovery, and explanation tests.

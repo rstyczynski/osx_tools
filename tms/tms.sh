@@ -10,7 +10,7 @@ function tms() {
   printf 'backup_volume=%s\n' "${backup_volume:-/Volumes/Backup}"
   case "$src_dir" in
     ''|-h|--help) usage; return 0 ;;
-    --version) printf 'TimeMachine Simplified 1.5.1\n'; return 0 ;;
+    --version) printf 'TimeMachine Simplified 1.6.0\n'; return 0 ;;
     --scheduler|--swiftbar|--switfbar|--access)
       if [[ $# -gt 2 ]]; then
         printf 'Usage: tms %s [on|off|status] (access: setup|status)\n' "$src_dir" >&2
@@ -20,6 +20,16 @@ function tms() {
       [[ "$feature" = switfbar ]] && feature=swiftbar
       TMS_BACKUP_VOLUME="${backup_volume:-${TMS_BACKUP_VOLUME:-}}" /usr/bin/python3 \
         "$_TMS_SCRIPT_DIR/tms_manage.py" "$feature" "${2:-status}"
+      return $?
+      ;;
+    --explain)
+      if [[ $# -lt 2 ]]; then
+        printf 'Usage: tms --explain PATH [--source ROOT]\n' >&2
+        return 2
+      fi
+      shift
+      backup_volume="${backup_volume:-/Volumes/Backup}" /usr/bin/python3 -B \
+        "$_TMS_SCRIPT_DIR/tms_excludes.py" explain "$@"
       return $?
       ;;
     --sources)
@@ -48,17 +58,18 @@ function tms() {
   # Batch callers own the arrays; standalone calls create a one-row report.
   if [[ ${_tms_collect_report:-no} != yes ]]; then
     local _tms_report_count=0
+    local _tms_report_excluded=()
     local _tms_report_sources=() _tms_report_statuses=() _tms_report_changes=()
     local _tms_report_types=() _tms_report_seconds=() _tms_report_details=()
   fi
-  local _tms_result_changed=- _tms_result_type=- _tms_result_detail='Backup failed (see output)'
+  local _tms_result_excluded=- _tms_result_changed=- _tms_result_type=- _tms_result_detail='Backup failed (see output)'
   local started=$SECONDS status=FAILED result=1
   if _tms_backup_source "$src_dir" "$full"; then
     status=OK
     result=0
   fi
   _tms_report_add "$src_dir" "$status" "$_tms_result_changed" \
-    "$_tms_result_type" "$((SECONDS - started))" "$_tms_result_detail"
+    "$_tms_result_type" "$((SECONDS - started))" "$_tms_result_detail" "$_tms_result_excluded"
   if [[ ${_tms_collect_report:-no} != yes ]]; then
     _tms_report_print
   fi
@@ -129,18 +140,19 @@ function _tms_backup_source() {
   #
   # Process file discovery
   #
-  if [[ "$backup_type" = full ]]; then
-    find "$src_dir" > "$backup_dst.files" || return 1
-  else
-    local latest_backup
-    latest_backup="$(realpath "$backup_dir/latest").start"
-
+  local latest_marker=
+  if [[ "$backup_type" != full ]]; then
+    latest_marker="$(realpath "$backup_dir/latest").start"
     echo "Creating hard links..."
     gcp -al "$backup_dir/latest/." "$backup_dst/" || return 1
-
-    echo "Discovering changed files..."
-    find "$src_dir" -cnewer "$latest_backup" -type f > "$backup_dst.files" || return 1
   fi
+
+  echo "Applying exclusion rules and discovering files..."
+  local policy_args=(prepare "$src_dir" "$backup_dst")
+  [[ -n "$latest_marker" ]] && policy_args+=(--marker "$latest_marker")
+  _tms_result_detail='Exclusion scan failed (see output)'
+  _tms_result_excluded=$(/usr/bin/python3 -B "$_TMS_SCRIPT_DIR/tms_excludes.py" "${policy_args[@]}") || return 1
+  printf 'Excluded files: %s\n' "$_tms_result_excluded"
 
   #
   # Backup files
@@ -151,7 +163,7 @@ function _tms_backup_source() {
   echo "Copying $backup_type backup..."
   # Keep progress visible and retain the exact transfer statistics for reporting.
   LC_ALL=C rsync -a --copy-links "$progress_option" --stats \
-    --files-from="$backup_dst.files" / "$backup_dst" | tee "$backup_dst.stats"
+    --from0 --files-from="$backup_dst.files0" / "$backup_dst" | tee "$backup_dst.stats"
   local copy_status=("${PIPESTATUS[@]}")
   local transferred
   transferred=$(awk '/^Number of regular files transferred:/ {gsub(/,/, "", $NF); print $NF}' "$backup_dst.stats")
@@ -174,6 +186,7 @@ function _tms_report_add() {
   _tms_report_types+=("$4")
   _tms_report_seconds+=("$5")
   _tms_report_details+=("$6")
+  _tms_report_excluded+=("${7:--}")
   _tms_report_count=$((_tms_report_count + 1))
 }
 
@@ -188,8 +201,8 @@ function _tms_report_print() {
   done
   printf '\n================================================================\n'
   printf 'FINAL BACKUP REPORT\n'
-  printf '%-*s | %-7s | %7s | %-11s | %7s | %s\n' \
-    "$width" SOURCE STATUS CHANGED TYPE SECONDS 'SNAPSHOT / NOTE'
+  printf '%-*s | %-7s | %7s | %8s | %-11s | %7s | %s\n' \
+    "$width" SOURCE STATUS CHANGED EXCLUDED TYPE SECONDS 'SNAPSHOT / NOTE'
   for ((i=0; i<_tms_report_count; i++)); do
     source=${_tms_report_sources[i]//$'\n'/\\n}
     source=${source//$'\r'/\\r}
@@ -197,8 +210,8 @@ function _tms_report_print() {
     detail=${_tms_report_details[i]//$'\n'/\\n}
     detail=${detail//$'\r'/\\r}
     detail=${detail//$'\t'/\\t}
-    printf '%-*s | %-7s | %7s | %-11s | %7s | %s\n' \
-      "$width" "$source" "${_tms_report_statuses[i]}" "${_tms_report_changes[i]}" \
+    printf '%-*s | %-7s | %7s | %8s | %-11s | %7s | %s\n' \
+      "$width" "$source" "${_tms_report_statuses[i]}" "${_tms_report_changes[i]}" "${_tms_report_excluded[i]}" \
       "${_tms_report_types[i]}" "${_tms_report_seconds[i]}" "$detail"
     case "${_tms_report_statuses[i]}" in
       OK) ok=$((ok + 1)) ;;
@@ -208,7 +221,7 @@ function _tms_report_print() {
   done
   printf 'Total: %s | OK: %s | FAILED: %s | SKIPPED: %s\n' \
     "$_tms_report_count" "$ok" "$failed" "$skipped"
-  printf 'Changed = regular files transferred by rsync; - = unavailable.\n'
+  printf 'Changed = regular files transferred; excluded = unique excluded files in the source or carried snapshot; - = unavailable.\n'
 }
 
 function _tms_source_header() {
@@ -333,6 +346,7 @@ function _tms_list_sources() {
 function _tms_known_sources() {
   local _tms_collect_report=yes
   local _tms_report_count=0
+  local _tms_report_excluded=()
   local _tms_report_sources=() _tms_report_statuses=() _tms_report_changes=()
   local _tms_report_types=() _tms_report_seconds=() _tms_report_details=()
   local root="${backup_volume:-/Volumes/Backup}/backup"
@@ -395,20 +409,24 @@ function tms_restore() {
 
 
   echo "Restoring '$backup_src/$backup_time_label' -> '$restore_dest/'"
-  rsync -a --info=progress2  "$backup_src/$backup_time_label" "$restore_dest/"
+  rsync -a --info=progress2 "$backup_src/$backup_time_label" "$restore_dest/" || return 1
+  if [[ -f "$backup_src/$backup_time_label.rules.json" ]]; then
+    cp "$backup_src/$backup_time_label.rules.json" "$restore_dest/tms-exclusions.json" || return 1
+  fi
 
 }
 
 function usage() {
   cat <<EOF
 
-TimeMachine Simplified 1.5.1
+TimeMachine Simplified 1.6.0
 
 Usage:
 backup_volume=/Volumes/Backup
 tms src_dir [full]
 tms --all
 tms --sources
+tms --explain PATH [--source ROOT]
 tms --scheduler on|off|status
 tms --swiftbar on|off|status
 tms --access setup|status
@@ -432,6 +450,7 @@ function tms_batch() {
   fi
   local _tms_collect_report=yes
   local _tms_report_count=0
+  local _tms_report_excluded=()
   local _tms_report_sources=() _tms_report_statuses=() _tms_report_changes=()
   local _tms_report_types=() _tms_report_seconds=() _tms_report_details=()
   local line failures=0

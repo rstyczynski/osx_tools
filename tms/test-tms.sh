@@ -5,6 +5,8 @@ fixture=$(mktemp -d /tmp/tms-test.XXXXXX)
 fixture=$(cd "$fixture" && pwd -P)
 trap 'rm -rf "$fixture"' EXIT
 export PATH="/opt/homebrew/bin:$PATH"
+export TMS_EXCLUDES_FILE="$fixture/central-excludes"
+: > "$TMS_EXCLUDES_FILE"
 backup_volume="$fixture/destination"
 mkdir -p "$fixture/source one" "$fixture/source two"
 printf 'original\n' > "$fixture/source one/file"
@@ -68,7 +70,7 @@ grep -q 'Sources: 0' "$fixture/output"
 # Bare invocation and informational options must not start backups.
 tms > "$fixture/output"
 grep -q 'With no arguments' "$fixture/output"
-tms --version | grep -q '1.5.1'
+tms --version | grep -q '1.6.0'
 tms --help > "$fixture/output"
 if tms --unknown > "$fixture/output" 2>&1; then exit 1; fi
 if tms --all extra > "$fixture/output" 2>&1; then exit 1; fi

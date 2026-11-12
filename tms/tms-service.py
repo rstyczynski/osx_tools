@@ -69,11 +69,14 @@ def email_body(summary):
     header = next((i for i, line in enumerate(lines) if line.strip().startswith("SOURCE ") and " | STATUS" in line), None)
     if header is None:
         return summary
+    headers = [part.strip() for part in lines[header].split(" | ")]
+    if len(headers) not in (6, 7):
+        return summary
     rows = []
     end = header + 1
     while end < len(lines) and " | " in lines[end] and not lines[end].startswith("Total:"):
         columns = [part.strip() for part in lines[end].split(" | ")]
-        if len(columns) != 6 or columns[1] not in ("OK", "FAILED", "SKIPPED"):
+        if len(columns) != len(headers) or columns[1] not in ("OK", "FAILED", "SKIPPED"):
             return summary  # Never damage an unfamiliar report.
         rows.append(columns)
         end += 1
@@ -86,10 +89,10 @@ def email_body(summary):
             prefix = "Sources under: " + common + "\n\n"
             for row in rows:
                 row[0] = os.path.relpath(row[0], common)
-    headers = ["SOURCE", "STATUS", "CHANGED", "TYPE", "SECONDS", "SNAPSHOT / NOTE"]
-    widths = [max(len(headers[i]), *(len(row[i]) for row in rows)) for i in range(6)]
+    widths = [max(len(headers[i]), *(len(row[i]) for row in rows)) for i in range(len(headers))]
+    numeric = {i for i, title in enumerate(headers) if title in ("CHANGED", "EXCLUDED", "SECONDS")}
     def render(row):
-        return " | ".join(value.rjust(widths[i]) if i in (2, 4) else value.ljust(widths[i]) for i, value in enumerate(row))
+        return " | ".join(value.rjust(widths[i]) if i in numeric else value.ljust(widths[i]) for i, value in enumerate(row))
     metadata = [line for line in lines[:header] if line != "FINAL BACKUP REPORT"]
     while metadata and not metadata[-1].strip():
         metadata.pop()
