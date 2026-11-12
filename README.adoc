@@ -17,6 +17,7 @@ Version 1.6.0. See link:tms/README.adoc[the tms README] and link:tms/CHANGELOG.a
 * *SwiftBar integration* showing status and backup-now actions for all or individual sources.
 * *Formatted email summaries* with aligned Courier tables and scheduler information.
 * *Snapshot restore* to a separate destination.
+* *Agent-assisted source optimization* through an optional review guide and example prompts for your own agentic layer.
 * *Guided macOS access setup* and an automated background-access check.
 * *Overlap protection* for scheduled and menu-triggered backups, with saved logs and summaries.
 

@@ -2,6 +2,8 @@
 
 == 1.6.0 — 2026-11-12
 
+* Add an opt-in agent-review `AGENTS.md` with source-analysis, recovery-evidence, policy-proposal, verification, and authorized-application guidance, plus six portable example prompts. No AI runtime is added.
+
 * Add central exclusions at `~/.config/tms/excludes` and nested project `.tmsignore` overrides, with last-match-wins include exceptions.
 * Add `tms --explain PATH [--source ROOT]` showing the selected context, matching rule, and origin.
 * Filter full backups and the newly cloned incremental tree; preserve source files and older snapshot entries.

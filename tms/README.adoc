@@ -162,6 +162,39 @@ than silently omitting data, and do not advance `latest`. The backup destination
 must be outside the source directory. Rules do not rewrite or remove excluded
 files that are already stored as objects in Git history.
 
+== Optional agent-assisted source review
+
+TMS provides a portable review guide for the user's own agentic layer. It does
+not call an AI service or start an autonomous review. Point your preferred agent
+at link:agent-review/AGENTS.md[the agent review instructions] and select one of
+link:agent-review/PROMPTS.md[the six example prompts]. Substitute the actual TMS,
+backup-source, and project paths before using a prompt.
+
+The guide requires reading the installed TMS documentation, establishing how
+large inputs can be recovered, distinguishing reproducible downloads/build data
+from unique source/results, and inspecting existing exclusion rules for accidental
+omissions. It covers scoped local overrides, concrete configuration proposals,
+`--explain` verification with the actual source root, and rollback for authorized
+edits. It also requires keeping recovery manifests and revisions available.
+
+Start with the read-only discovery or project-proposal prompt. An agent should
+apply rules only when the user has authorized that scope. The apply prompt accepts
+an exact approved patch and does not authorize cleanup, Git history changes,
+remote pushes, scheduler changes, or production backups. Audit output must
+separate estimated future backup-input reduction from reclaimed source/snapshot space.
+
+Reference the guide from your existing agent instructions if useful:
+
+[source,text]
+----
+When explicitly asked to review TMS backup-source optimization, also read
+/path/to/osx_tools/tms/agent-review/AGENTS.md and follow the installed TMS docs.
+----
+
+Keep the project's existing instructions intact. The guide is opt-in and scoped
+to requested source analysis; placing it in a subdirectory does not automatically
+activate it in unrelated projects. No particular agent vendor or model is required.
+
 == Destination layout and discovery
 
 Snapshots live in `backup_volume/backup/<source-basename>/<timestamp>[.full]`.
