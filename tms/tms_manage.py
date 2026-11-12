@@ -76,7 +76,7 @@ def build_helper():
     command(["/usr/bin/swiftc", "-O", str(ROOT / "TMSBackup.swift"), "-o", str(binary)], check=True)
     info = {"CFBundleIdentifier": "local.tms.helper", "CFBundleName": "TMS Backup",
             "CFBundleDisplayName": "TMS Backup", "CFBundleExecutable": "TMSBackup",
-            "CFBundlePackageType": "APPL", "CFBundleVersion": "1.6.0", "LSUIElement": True,
+            "CFBundlePackageType": "APPL", "CFBundleVersion": "1.7.0", "LSUIElement": True,
             "NSAppleEventsUsageDescription": "TMS sends your backup summary using your configured Mail account.",
             "TMSRunnerPath": str(ROOT / "tms-run.sh")}
     info_path.write_bytes(plistlib.dumps(info))

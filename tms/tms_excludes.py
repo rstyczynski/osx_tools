@@ -204,6 +204,86 @@ def infer_source(path, volume):
     return path if path.is_dir() else path.parent
 
 
+def estimate(source):
+    """Metadata-only full-source estimate; create no manifests or snapshot state."""
+    source = Path(source).expanduser().resolve()
+    if not source.is_dir():
+        raise ValueError("SOURCE must be an existing directory: " + str(source))
+    policy = Policy(source)
+    policy.local_rules(source)
+    categories = {name: {"entries": 0, "regular_files": 0, "symlinks": 0,
+                         "other_entries": 0, "logical_bytes": 0}
+                  for name in ("included", "excluded")}
+    root_info = source.stat()
+    seen = {(root_info.st_dev, root_info.st_ino)}
+    allocated = root_info.st_blocks * 512
+    hardlink_aliases = 0
+    for path, info in walk(source):
+        directory = stat.S_ISDIR(info.st_mode)
+        if path.name == ".tmsignore" and not directory:
+            policy.local_rules(path.parent)
+        included, _, _ = policy.decision(path, directory)
+        key = (info.st_dev, info.st_ino)
+        if key not in seen:
+            allocated += info.st_blocks * 512
+            seen.add(key)
+        elif stat.S_ISREG(info.st_mode):
+            hardlink_aliases += 1
+        if directory:
+            continue
+        bucket = categories["included" if included else "excluded"]
+        bucket["entries"] += 1
+        if stat.S_ISREG(info.st_mode):
+            bucket["regular_files"] += 1
+            bucket["logical_bytes"] += info.st_size
+        elif stat.S_ISLNK(info.st_mode):
+            bucket["symlinks"] += 1
+        else:
+            bucket["other_entries"] += 1
+    total = {key: categories["included"][key] + categories["excluded"][key]
+             for key in categories["included"]}
+    return {"source": str(source), "central_file": str(policy.central),
+            "central_loaded_from": str(next(iter(policy.records))),
+            "local_rule_files": [path for path in policy.records if Path(path).name == ".tmsignore"],
+            "total": total, **categories, "source_allocated_bytes": allocated,
+            "hardlink_aliases": hardlink_aliases, "symlink_targets_sized": False,
+            "estimate_kind": "full-source logical regular-file bytes; not incremental destination usage"}
+
+
+def human_bytes(value):
+    size = float(value)
+    for unit in ("B", "KiB", "MiB", "GiB", "TiB", "PiB"):
+        if size < 1024 or unit == "PiB":
+            return "%d B" % value if unit == "B" else "%.2f %s" % (size, unit)
+        size /= 1024
+
+
+def print_estimate(result):
+    print("TMS SOURCE ESTIMATE")
+    print("Source:", result["source"])
+    print("Central rules:", result["central_file"])
+    if result["central_loaded_from"] != result["central_file"]:
+        print("Using bundled defaults:", result["central_loaded_from"])
+    print("Local rule files:", len(result["local_rule_files"]))
+    for path in result["local_rule_files"]:
+        print("  " + path)
+    print()
+    print("%-10s | %12s | %16s | %s" % ("CATEGORY", "ENTRIES", "LOGICAL SIZE", "EXACT BYTES"))
+    for name in ("total", "included", "excluded"):
+        row = result[name]
+        print("%-10s | %12s | %16s | %s" % (name.upper(), format(row["entries"], ","),
+              human_bytes(row["logical_bytes"]), format(row["logical_bytes"], ",")))
+    total_bytes = result["total"]["logical_bytes"]
+    percentage = 100 * result["excluded"]["logical_bytes"] / total_bytes if total_bytes else 0
+    print("Excluded share of regular-file bytes: %.1f%%" % percentage)
+    print("Source allocated usage (hard links counted once):", human_bytes(result["source_allocated_bytes"]))
+    print("Entries count non-directory paths; bytes count regular-file data per path.")
+    print("Symlinks: %s included, %s excluded; targets are not traversed or sized." %
+          (result["included"]["symlinks"], result["excluded"]["symlinks"]))
+    print("Read-only full-source estimate; no backup or state files created.")
+    print("Destination usage varies with links, sparse files, filesystem allocation, and snapshot history.")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
@@ -214,9 +294,18 @@ def main():
     explain = commands.add_parser("explain")
     explain.add_argument("path")
     explain.add_argument("--source")
+    size = commands.add_parser("estimate")
+    size.add_argument("source")
+    size.add_argument("--json", action="store_true")
     args = parser.parse_args()
     if args.command == "prepare":
         print(prepare(args.source, args.snapshot, bool(args.marker), args.marker))
+    elif args.command == "estimate":
+        result = estimate(args.source)
+        if args.json:
+            print(json.dumps(result, indent=2))
+        else:
+            print_estimate(result)
     else:
         path = absolute(args.path)
         source = Path(args.source).resolve() if args.source else infer_source(path, os.environ.get("backup_volume", "/Volumes/Backup"))

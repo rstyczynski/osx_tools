@@ -1,6 +1,6 @@
 = TimeMachine Simplified (tms)
 
-Version 1.6.0. Bash functions for full and incremental directory backups.
+Version 1.7.0. Bash functions for full and incremental directory backups.
 
 == Setup
 
@@ -30,6 +30,8 @@ tms ~/Documents             # First full backup, then incremental snapshots
 tms ~/Documents full        # Force a full snapshot
 tms --all                   # Back up all sources already known at this destination
 tms --sources               # List known sources, states, sizes, files, and last backup
+tms --estimate ~/project     # Estimate a candidate source using active rules
+tms --estimate ~/project --json # Machine-readable estimate
 tms --explain ~/project/.models/weights.bin --source ~/project
 ----
 
@@ -61,6 +63,42 @@ Size is allocated source disk usage from `du`, expressed in KiB/MiB/GiB;
 file counts include regular files. Scans do not follow symbolic links and may
 take time on large directory trees. The inventory command succeeds even when
 rows show unavailable sources; a missing backup root is an error.
+
+=== Estimate a candidate source
+
+[source,bash]
+----
+tms --estimate ~/projects/meeting_minutes
+tms --estimate ~/projects/meeting_minutes --json
+----
+
+`--estimate SOURCE` accepts any existing directory; it does not need to be a
+registered backup source or have a mounted backup destination. SOURCE is the
+candidate backup root, so anchored central rules are evaluated relative to it.
+The command uses the same central policy, ancestor/local `.tmsignore` rules,
+include exceptions, and protected-configuration decisions as backups.
+
+The text report shows total, included, and excluded non-directory path counts,
+regular-file logical sizes in human-readable units and exact bytes, the excluded
+percentage of regular-file bytes, allocated source usage, and the active central
+and local rule files. `--json` emits only JSON on stdout, with the same counts,
+byte values, link counts, policy paths, and resolved source root.
+
+This is a metadata-only estimate for a full source, not an incremental transfer
+or a disk-reservation prediction. Regular-file logical bytes are counted per
+path: source hard-link aliases can become separate files in a full backup.
+Allocated source usage counts hard-linked inodes once. Symlink targets are not
+followed or sized, and their included/excluded counts are shown separately;
+the backup's `--copy-links` behavior may copy data not represented by these bytes.
+Special-file data and directory metadata are not included in logical byte totals.
+Destination allocation, sparse files, compression, links to earlier snapshots,
+and previously retained source-deleted files can change actual backup storage.
+
+The estimator creates no snapshot, manifest, policy sidecar, status file, or
+configuration, and sends no email. It reads policy files and filesystem metadata,
+without reading model/audio/file contents. Invalid rules, inaccessible directories,
+and missing sources return a nonzero status rather than a partial success report.
+An existing but empty source reports zero entries and zero logical bytes.
 
 == Central exclusions and local overrides (1.6.0)
 
@@ -227,7 +265,7 @@ into that directory, retaining its stored absolute-path tree.
 
 The following metadata behavior and correctness bugs were checked on macOS with
 GNU rsync 3.4.1 on 2026-11-12 using temporary full-backup, restore, and incremental
-cycles. The two correctness bugs remain in version 1.6.0. Version 1.6.0 adds
+cycles. The two correctness bugs remain in version 1.7.0. Version 1.6.0 adds
 policy filtering and captures new included empty directories; it does not repair
 historical metadata or the rsync content quick-check bug.
 

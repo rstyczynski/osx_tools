@@ -4,13 +4,14 @@
 
 TimeMachine Simplified is a file backup tool. Supports full and incremental copies, with a final report showing one row per source.
 
-Version 1.6.0. See link:tms/README.adoc[the tms README] and link:tms/CHANGELOG.adoc[changelog].
+Version 1.7.0. See link:tms/README.adoc[the tms README] and link:tms/CHANGELOG.adoc[changelog].
 
 === Features
 
 * *Full and incremental backups*, with timestamped snapshots and hard links.
 * *Batch backups* of all sources already known at the destination using `tms --all`.
 * *Central exclusions and local overrides* with `.tmsignore` include exceptions, excluded-file counts, and `tms --explain`.
+* *Read-only source estimates* with included/excluded sizes and counts, plus JSON output for agents.
 * *Source inventory* showing state, size, file count, and last backup using `tms --sources`.
 * *Per-source reports* showing status, changed files, duration, and snapshot details.
 * *Native macOS scheduling* every four hours, with catch-up after sleep and on/off/status controls.
@@ -32,6 +33,7 @@ backup_volume=/Volumes/Backup
 tms src_dir [full]
 tms --all          # Back up existing sources discovered at the destination
 tms --sources      # List source state, size, files, and last successful backup
+tms --estimate /candidate/source [--json]
 tms --explain /path/to/file --source /backup/source
 tms --scheduler on|off|status
 tms --swiftbar on|off|status
@@ -54,4 +56,4 @@ Target backup volume file systems supports hard links.
 * Restore copies the stored snapshot and absolute-path tree into a new destination.
 
 See link:tms/README.adoc#limitations[the verified limitations and known correctness bugs]
-for details. The two correctness bugs remain present in version 1.6.0.
+for details. The two correctness bugs remain present in version 1.7.0.

@@ -50,6 +50,13 @@ stores, downloaded dependencies, model caches, environments, and build products.
 Use read-only metadata commands such as `du`, directory listings, and
 `git count-objects -vH`. Start with `rg` for documentation/file searches.
 
+Use `tms --estimate /actual/source/root --json` for a read-only policy-aware
+baseline when the installed version supports it. It creates no backup artifacts.
+The argument is the candidate source root; estimating a nested project as a
+separate source changes the anchoring of central rules. For an existing backup,
+use its actual source root and `--explain` for project-specific decisions.
+Logical sizes exclude symlink targets and are not exact destination-space predictions.
+
 Report allocated space in explicit units (MiB/GiB). Avoid double-counting nested
 directories and hard links. Note that APFS clones, sparse files, and existing
 backup deduplication can make estimated avoided bytes differ from disk space

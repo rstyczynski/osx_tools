@@ -13,6 +13,7 @@ Audit /path/to/source for opportunities to reduce future backup input.
 This is read-only: do not change rules, delete files, repack Git, download data,
 change scheduling, or run backups.
 
+Use tms --estimate /path/to/source --json for the current policy baseline.
 Measure the largest directories without double-counting nested data or hard
 links. Separate downloaded dependencies/models and build outputs from original
 data and authored results. For each candidate, give its size, reproducibility

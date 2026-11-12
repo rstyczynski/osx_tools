@@ -7,10 +7,12 @@ function tms() {
   local src_dir="${1:-}"
   local full="${2:-no}"
 
-  printf 'backup_volume=%s\n' "${backup_volume:-/Volumes/Backup}"
+  if [[ "$src_dir" != --estimate ]]; then
+    printf 'backup_volume=%s\n' "${backup_volume:-/Volumes/Backup}"
+  fi
   case "$src_dir" in
     ''|-h|--help) usage; return 0 ;;
-    --version) printf 'TimeMachine Simplified 1.6.0\n'; return 0 ;;
+    --version) printf 'TimeMachine Simplified 1.7.0\n'; return 0 ;;
     --scheduler|--swiftbar|--switfbar|--access)
       if [[ $# -gt 2 ]]; then
         printf 'Usage: tms %s [on|off|status] (access: setup|status)\n' "$src_dir" >&2
@@ -20,6 +22,15 @@ function tms() {
       [[ "$feature" = switfbar ]] && feature=swiftbar
       TMS_BACKUP_VOLUME="${backup_volume:-${TMS_BACKUP_VOLUME:-}}" /usr/bin/python3 \
         "$_TMS_SCRIPT_DIR/tms_manage.py" "$feature" "${2:-status}"
+      return $?
+      ;;
+    --estimate)
+      if [[ $# -lt 2 || $# -gt 3 || ( $# -eq 3 && "${3:-}" != --json ) ]]; then
+        printf 'Usage: tms --estimate SOURCE [--json]\n' >&2
+        return 2
+      fi
+      shift
+      /usr/bin/python3 -B "$_TMS_SCRIPT_DIR/tms_excludes.py" estimate "$@"
       return $?
       ;;
     --explain)
@@ -419,13 +430,14 @@ function tms_restore() {
 function usage() {
   cat <<EOF
 
-TimeMachine Simplified 1.6.0
+TimeMachine Simplified 1.7.0
 
 Usage:
 backup_volume=/Volumes/Backup
 tms src_dir [full]
 tms --all
 tms --sources
+tms --estimate SOURCE [--json]
 tms --explain PATH [--source ROOT]
 tms --scheduler on|off|status
 tms --swiftbar on|off|status

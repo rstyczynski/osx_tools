@@ -1,5 +1,12 @@
 = Changelog
 
+== 1.7.0 — 2026-11-12
+
+* Add read-only `tms --estimate SOURCE [--json]` for total/included/excluded entry counts and logical byte sizes using the active exclusion policy.
+* Report allocated source usage with hard links counted once, active rule files, and explicit symlink/storage caveats. No backup or policy artifacts are created.
+* Add estimate regression tests for overrides, hard links, sparse files, symlinks, empty/missing sources, and Bash text/JSON dispatch.
+
+
 == 1.6.0 — 2026-11-12
 
 * Add an opt-in agent-review `AGENTS.md` with source-analysis, recovery-evidence, policy-proposal, verification, and authorized-application guidance, plus six portable example prompts. No AI runtime is added.

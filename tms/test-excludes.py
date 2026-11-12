@@ -8,7 +8,7 @@ import tempfile
 import time
 import unittest
 from unittest.mock import patch
-from tms_excludes import Policy, prepare
+from tms_excludes import Policy, prepare, estimate
 
 ROOT = Path(__file__).resolve().parent
 
@@ -70,6 +70,61 @@ class ExclusionTest(unittest.TestCase):
         self.central.write_text("!\n")
         with self.assertRaises(ValueError):
             Policy(self.source)
+
+    def test_estimate_uses_rules_and_does_not_write(self):
+        keep = self.file("keep.txt", "keep")
+        dropped = self.file(".models/downloaded/weights.bin", "downloaded")
+        trained = self.file(".models/trained/weights.bin", "trained")
+        rules = self.file(".tmsignore", "!/.models/trained/\n")
+        before = {str(path.relative_to(self.base)) for path in self.base.rglob("*")}
+        result = estimate(self.source)
+        self.assertEqual(result["included"]["entries"], 3)
+        self.assertEqual(result["excluded"]["entries"], 1)
+        self.assertEqual(result["included"]["logical_bytes"], sum(p.stat().st_size for p in (keep, trained, rules)))
+        self.assertEqual(result["excluded"]["logical_bytes"], dropped.stat().st_size)
+        self.assertEqual(result["total"]["logical_bytes"], sum(p.stat().st_size for p in (keep, trained, rules, dropped)))
+        self.assertIn(str(rules), result["local_rule_files"])
+        self.assertEqual(before, {str(path.relative_to(self.base)) for path in self.base.rglob("*")})
+
+    def test_estimate_hardlinks_sparse_files_and_symlinks(self):
+        self.central.write_text("")
+        regular = self.file("file", "0123456789")
+        os.link(regular, self.source / "alias")
+        external = self.base / "external"
+        external.write_bytes(b"x" * 1000)
+        (self.source / "external-link").symlink_to(external)
+        (self.source / "broken-link").symlink_to(self.base / "missing")
+        sparse = self.source / "sparse"
+        with sparse.open("wb") as stream:
+            stream.truncate(1024 * 1024)
+        os.mkfifo(self.source / "pipe")
+        result = estimate(self.source)
+        self.assertEqual(result["total"]["entries"], 6)
+        self.assertEqual(result["total"]["logical_bytes"], 1024 * 1024 + 20)
+        self.assertEqual(result["total"]["symlinks"], 2)
+        self.assertEqual(result["total"]["other_entries"], 1)
+        self.assertEqual(result["hardlink_aliases"], 1)
+        self.assertFalse(result["symlink_targets_sized"])
+        self.assertLess(result["source_allocated_bytes"], result["total"]["logical_bytes"])
+
+    def test_estimate_empty_missing_and_invalid_policy(self):
+        self.assertEqual(estimate(self.source)["total"]["logical_bytes"], 0)
+        with self.assertRaises(ValueError):
+            estimate(self.base / "missing")
+        self.central.write_text("!\n")
+        with self.assertRaises(ValueError):
+            estimate(self.source)
+
+    def test_estimate_command_text_and_pure_json(self):
+        self.file("keep.txt", "keep")
+        for shell in ("/bin/bash", "/opt/homebrew/bin/bash"):
+            command = [shell, "-c", 'source "$1"; shift; tms "$@"', "tms", str(ROOT / "tms.sh"), "--estimate", str(self.source)]
+            completed = subprocess.run(command, capture_output=True, text=True, check=True)
+            self.assertIn("TMS SOURCE ESTIMATE", completed.stdout)
+            self.assertIn("INCLUDED", completed.stdout)
+            self.assertIn("EXCLUDED", completed.stdout)
+            completed = subprocess.run(command + ["--json"], capture_output=True, text=True, check=True)
+            self.assertEqual(json.loads(completed.stdout)["included"]["logical_bytes"], 4)
 
     def test_full_scan_keeps_config_and_newline_filename(self):
         self.file(".build/discard")
