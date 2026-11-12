@@ -88,6 +88,78 @@ tms_restore Documents 2026-11-12T130000.full /Volumes/Data/Restore
 The restore directory must not already exist. The selected snapshot is copied
 into that directory, retaining its stored absolute-path tree.
 
+[[limitations]]
+== Limitations and known correctness bugs
+
+The following behavior was checked on macOS with GNU rsync 3.4.1 on 2026-11-12,
+using temporary files through full backup, restore, and incremental backup cycles.
+The audit did not change production backups. These limitations and bugs remain
+present in version 1.5.1; documenting them does not fix the implementation.
+
+=== Metadata fidelity
+
+[cols="1,3",options="header"]
+|===
+|Metadata |Current behavior
+|File modification date (`mtime`)
+|Preserved by `rsync -a`, including during restore; it is not generally reset to copy time.
+|Unix permission bits
+|Preserved on a full backup and restore. See the shared-snapshot metadata bug below.
+|Owner and group
+|Requested by `rsync -a`, subject to the user's privileges and the target filesystem; arbitrary ownership is not guaranteed.
+|Original creation date (birth time)
+|Not explicitly preserved. In the test, a file created in 2000 and modified in 2001 was restored with a 2001 creation date.
+|Metadata-change time (`ctime`)
+|Filesystem-managed; changes during copying and metadata updates rather than restoring the source value.
+|Access time (`atime`)
+|Not explicitly preserved; reading files can itself update it.
+|Access control lists (ACLs)
+|Not preserved by the current rsync flags; the test's additional ACL was lost.
+|Extended attributes and macOS-specific metadata
+|Not preserved by the current rsync flags; a custom extended attribute was lost. Finder tags and resource-fork metadata must not be assumed to survive.
+|===
+
+Archive mode alone does not enable rsync's ACL, extended-attribute, access-time,
+creation-time, or source-hard-link preservation options. See the
+https://www.samba.org/ftp/rsync/rsync.html[rsync archive-mode documentation].
+Metadata omitted during backup cannot be recovered merely by changing restore options.
+
+=== Filesystem layout and restore behavior
+
+* *Deletions are not mirrored.* A file deleted from the source remains in later
+  incremental snapshots. A snapshot can therefore contain files no longer in the source.
+* *New empty directories are omitted from incremental backups.* Incremental
+  discovery selects regular files only. Directory-only metadata changes are
+  likewise outside that manifest.
+* *Symbolic links are dereferenced.* Backup uses `--copy-links`; the restored
+  test symlink was an ordinary file containing its target's data, not a symlink.
+  Incremental discovery does not track symlink entries themselves.
+* *Original hard-link relationships are lost.* Two source filenames sharing
+  one inode were restored as independent files. Hard links used between TMS
+  snapshots are a separate storage optimization.
+* *Restore copies a tree.* It requires a new destination and copies the selected
+  timestamp directory, including the stored absolute-path hierarchy. It does
+  not restore directly over the original source or provide a complete macOS
+  system/Time Machine restore.
+
+=== Known correctness bugs
+
+* *Changed contents can be missed.* Incremental discovery uses `ctime`, but
+  rsync subsequently uses its default size/mtime quick check. A same-length edit
+  with the original modification date restored was selected for processing yet
+  skipped by rsync: the source contained the new text while the new backup
+  still contained the old text. A successful run or zero transferred files is
+  therefore not proof that source contents are identical.
+* *Historical snapshot metadata can change.* Incremental snapshots initially
+  share file inodes through hard links. Applying a later permission-only update
+  can modify metadata shared with earlier snapshots. In the test, changing a
+  source file from mode `0640` to `0600` and backing it up also changed the
+  original full snapshot's file mode to `0600`. Snapshots are not immutable
+  records of historical metadata.
+
+These two findings are backup-correctness defects requiring implementation
+changes, not merely display or reporting limitations.
+
 == File-based batch configuration
 
 The existing `tms_batch [config_file]` command remains available.

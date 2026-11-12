@@ -8,8 +8,18 @@ Version 1.5.1. See link:tms/README.adoc[the tms README] and link:tms/CHANGELOG.a
 
 === Features
 
-TMS also supports four-hour native launchd scheduling, SwiftBar menu actions, and emailed
-per-source summaries. See link:tms/README.adoc[the service setup documentation].
+* *Full and incremental backups*, with timestamped snapshots and hard links.
+* *Batch backups* of all sources already known at the destination using `tms --all`.
+* *Source inventory* showing state, size, file count, and last backup using `tms --sources`.
+* *Per-source reports* showing status, changed files, duration, and snapshot details.
+* *Native macOS scheduling* every four hours, with catch-up after sleep and on/off/status controls.
+* *SwiftBar integration* showing status and backup-now actions for all or individual sources.
+* *Formatted email summaries* with aligned Courier tables and scheduler information.
+* *Snapshot restore* to a separate destination.
+* *Guided macOS access setup* and an automated background-access check.
+* *Overlap protection* for scheduled and menu-triggered backups, with saved logs and summaries.
+
+See link:tms/README.adoc[the TMS documentation] for commands and setup.
 
 === Usage
 
@@ -30,4 +40,15 @@ tms --version
 Target backup volume file systems supports hard links.
 
 === Limitations
-Does not support file removal. Deleted files are not recognized.
+
+* Modification dates and Unix permission bits are preserved, but creation dates,
+  ACLs, and extended attributes are not fully preserved.
+* Symbolic links are copied as their targets; original hard-link relationships
+  are not preserved through backup and restore.
+* Incremental backups retain deleted files and omit new empty directories.
+* *Known correctness bugs:* same-size changes with unchanged modification dates
+  can be missed, and later permission changes can alter earlier snapshots' metadata.
+* Restore copies the stored snapshot and absolute-path tree into a new destination.
+
+See link:tms/README.adoc#limitations[the verified limitations and known correctness bugs]
+for details. These issues remain present in version 1.5.1.

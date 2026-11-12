@@ -2,6 +2,8 @@
 
 == 1.5.1 — 2026-11-12
 
+* Document the verified metadata/restore limitations and two outstanding incremental-backup correctness bugs: skipped same-size/same-mtime content changes and shared historical snapshot metadata. No backup behavior is changed by this documentation update.
+
 * Send report emails in Courier with a bold heading so columns remain aligned.
 * Put totals at the top and show common source-directory prefixes once, shortening table rows.
 * Preserve full paths in the original plain-text logs and summary; retain the compact email body separately.
