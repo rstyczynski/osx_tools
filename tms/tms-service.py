@@ -63,12 +63,53 @@ def sources(config):
     return result
 
 
+def email_body(summary):
+    """Compact the terminal report for styled, fixed-width email; keep raw logs intact."""
+    lines = summary.splitlines()
+    header = next((i for i, line in enumerate(lines) if line.strip().startswith("SOURCE ") and " | STATUS" in line), None)
+    if header is None:
+        return summary
+    rows = []
+    end = header + 1
+    while end < len(lines) and " | " in lines[end] and not lines[end].startswith("Total:"):
+        columns = [part.strip() for part in lines[end].split(" | ")]
+        if len(columns) != 6 or columns[1] not in ("OK", "FAILED", "SKIPPED"):
+            return summary  # Never damage an unfamiliar report.
+        rows.append(columns)
+        end += 1
+    if not rows:
+        return summary
+    prefix = ""
+    if all(os.path.isabs(row[0]) for row in rows):
+        common = os.path.commonpath([os.path.dirname(row[0]) for row in rows])
+        if common != "/":
+            prefix = "Sources under: " + common + "\n\n"
+            for row in rows:
+                row[0] = os.path.relpath(row[0], common)
+    headers = ["SOURCE", "STATUS", "CHANGED", "TYPE", "SECONDS", "SNAPSHOT / NOTE"]
+    widths = [max(len(headers[i]), *(len(row[i]) for row in rows)) for i in range(6)]
+    def render(row):
+        return " | ".join(value.rjust(widths[i]) if i in (2, 4) else value.ljust(widths[i]) for i, value in enumerate(row))
+    metadata = [line for line in lines[:header] if line != "FINAL BACKUP REPORT"]
+    while metadata and not metadata[-1].strip():
+        metadata.pop()
+    total = lines[end] if end < len(lines) and lines[end].startswith("Total:") else ""
+    if total:
+        metadata.insert(1, total)
+        end += 1
+    table = [render(headers), "-+-".join("-" * width for width in widths)] + [render(row) for row in rows]
+    return "\n".join(metadata) + "\n\n" + prefix + "\n".join(table) + "\n\n" + "\n".join(lines[end:]) + "\n"
+
+
 def send_email(config, summary_file, subject):
     recipient = os.environ.get("TMS_REPORT_EMAIL", "")
     if not recipient or any(c in recipient for c in "\r\n"):
         raise RuntimeError("TMS_REPORT_EMAIL is missing or invalid; export it in ~/.bash_profile")
     sender = config.get("mail_from", recipient)
-    command = ["/usr/bin/osascript", str(ROOT / "tms-mail.applescript"), recipient, sender, subject, str(summary_file)]
+    email_file = summary_file.with_suffix(".email.txt")
+    email_file.write_text(email_body(summary_file.read_text()))
+    email_file.chmod(0o600)
+    command = ["/usr/bin/osascript", str(ROOT / "tms-mail.applescript"), recipient, sender, subject, str(email_file)]
     completed = subprocess.run(command, capture_output=True, text=True, timeout=75)
     if completed.returncode:
         raise RuntimeError(completed.stderr.strip() or "Apple Mail could not submit the report")

@@ -68,7 +68,7 @@ grep -q 'Sources: 0' "$fixture/output"
 # Bare invocation and informational options must not start backups.
 tms > "$fixture/output"
 grep -q 'With no arguments' "$fixture/output"
-tms --version | grep -q '1.5'
+tms --version | grep -q '1.5.1'
 tms --help > "$fixture/output"
 if tms --unknown > "$fixture/output" 2>&1; then exit 1; fi
 if tms --all extra > "$fixture/output" 2>&1; then exit 1; fi

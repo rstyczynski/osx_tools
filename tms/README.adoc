@@ -1,6 +1,6 @@
 = TimeMachine Simplified (tms)
 
-Version 1.5. Bash functions for full and incremental directory backups.
+Version 1.5.1. Bash functions for full and incremental directory backups.
 
 == Setup
 
@@ -200,6 +200,12 @@ export TMS_REPORT_EMAIL="you@example.com"
 `--source /absolute/path` for a single source. A kernel file lock prevents two
 wrapper runs from overlapping and releases on exit or crash. Direct calls to
 `tms` bypass the wrapper lock.
+
+Emails use Apple Mail rich text (HTML with a plain-text alternative), Courier
+at 11 points with a bold heading, an overview of totals, and
+a compact aligned table. Common source-directory prefixes appear once above the
+table; full paths remain in the unmodified plain-text summary and logs. The
+formatted email body is retained alongside the summary as `.summary.email.txt`.
 
 Each completed run submits its final per-source summary through the already
 configured Apple Mail account. No SMTP passwords are stored by TMS. Emails

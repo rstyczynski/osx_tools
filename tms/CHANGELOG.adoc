@@ -1,5 +1,11 @@
 = Changelog
 
+== 1.5.1 — 2026-11-12
+
+* Send report emails in Courier with a bold heading so columns remain aligned.
+* Put totals at the top and show common source-directory prefixes once, shortening table rows.
+* Preserve full paths in the original plain-text logs and summary; retain the compact email body separately.
+
 == 1.5 — 2026-11-12
 
 * Add explicit `tms --scheduler on|off|status` controls with persistent launchd enable/disable state and actual schedule/next-run reporting.

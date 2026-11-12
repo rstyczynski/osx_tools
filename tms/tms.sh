@@ -10,7 +10,7 @@ function tms() {
   printf 'backup_volume=%s\n' "${backup_volume:-/Volumes/Backup}"
   case "$src_dir" in
     ''|-h|--help) usage; return 0 ;;
-    --version) printf 'TimeMachine Simplified 1.5\n'; return 0 ;;
+    --version) printf 'TimeMachine Simplified 1.5.1\n'; return 0 ;;
     --scheduler|--swiftbar|--switfbar|--access)
       if [[ $# -gt 2 ]]; then
         printf 'Usage: tms %s [on|off|status] (access: setup|status)\n' "$src_dir" >&2
@@ -402,7 +402,7 @@ function tms_restore() {
 function usage() {
   cat <<EOF
 
-TimeMachine Simplified 1.5
+TimeMachine Simplified 1.5.1
 
 Usage:
 backup_volume=/Volumes/Backup

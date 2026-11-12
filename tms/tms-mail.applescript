@@ -6,6 +6,11 @@ on run argv
     with timeout of 60 seconds
         tell application "Mail"
             set outgoingMessage to make new outgoing message with properties {subject:subjectText, content:bodyText, sender:senderAddress, visible:false}
+            -- Styled text makes Mail preserve the fixed-width table in rich-text email.
+            set font of content of outgoingMessage to "Courier"
+            set size of content of outgoingMessage to 11
+            set font of paragraph 1 of content of outgoingMessage to "Courier-Bold"
+            set size of paragraph 1 of content of outgoingMessage to 13
             tell outgoingMessage
                 make new to recipient at end of to recipients with properties {address:recipientAddress}
             end tell

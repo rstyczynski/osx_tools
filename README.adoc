@@ -4,7 +4,7 @@
 
 TimeMachine Simplified is a file backup tool. Supports full and incremental copies, with a final report showing one row per source.
 
-Version 1.5. See link:tms/README.adoc[the tms README] and link:tms/CHANGELOG.adoc[changelog].
+Version 1.5.1. See link:tms/README.adoc[the tms README] and link:tms/CHANGELOG.adoc[changelog].
 
 === Usage
 

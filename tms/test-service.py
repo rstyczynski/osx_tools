@@ -18,6 +18,25 @@ spec.loader.exec_module(service)
 
 
 class ServiceTest(unittest.TestCase):
+    def test_email_table_is_compact_and_aligned(self):
+        summary = ("TMS backup report\nScheduler: enabled\n\nFINAL BACKUP REPORT\n"
+                   "SOURCE | STATUS | CHANGED | TYPE | SECONDS | SNAPSHOT / NOTE\n"
+                   "/Users/example/Documents/Chat GPT | OK | 42 | incremental | 3 | snapshot-1\n"
+                   "/Users/example/Documents/CMI | FAILED | - | full | 1 | Copy failed\n"
+                   "Total: 2 | OK: 1 | FAILED: 1 | SKIPPED: 0\nLog: /tmp/test.log\n")
+        body = service.email_body(summary)
+        self.assertEqual(body.splitlines()[1], "Total: 2 | OK: 1 | FAILED: 1 | SKIPPED: 0")
+        self.assertIn("Sources under: /Users/example/Documents", body)
+        self.assertIn("Chat GPT", body)
+        self.assertIn("Copy failed", body)
+        self.assertIn("Scheduler: enabled", body)
+        self.assertNotIn("/Users/example/Documents/Chat GPT", body)
+        table = [line for line in body.splitlines() if line.startswith(("SOURCE ", "Chat GPT ", "CMI "))]
+        positions = [[i for i, c in enumerate(line) if c == "|"] for line in table]
+        self.assertEqual(len(table), 3)
+        self.assertTrue(all(p == positions[0] for p in positions))
+        self.assertEqual(service.email_body("No final table\nError: unavailable\n"), "No final table\nError: unavailable\n")
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="tms-service-", dir="/tmp")
         self.addCleanup(self.temp.cleanup)
