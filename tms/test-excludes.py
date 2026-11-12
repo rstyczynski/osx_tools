@@ -63,6 +63,16 @@ class ExclusionTest(unittest.TestCase):
         self.assertFalse(self.included(".build/output"))
         self.assertTrue(self.included("nested/.build/output"))
 
+    def test_default_venv_exclusion_and_local_keep(self):
+        self.central.write_text((ROOT / "excludes.default").read_text())
+        for name in ("venv", ".venv", "mlx-venv", "tts-venv"):
+            self.assertFalse(self.included("nested/" + name, True))
+            self.assertFalse(self.included("nested/" + name + "/lib/package.py"))
+            self.assertTrue(self.included(name))  # An ordinary file is not a directory.
+        self.file(".tmsignore", "!/tools/custom-venv/\n")
+        self.assertTrue(self.included("tools/custom-venv/lib/important.py"))
+        self.assertFalse(self.included("tools/other-venv/lib/package.py"))
+
     def test_invalid_rules_fail_and_escaped_comment_matches(self):
         self.central.write_text("\\#special\n\\!literal\n")
         self.assertFalse(self.included("#special"))

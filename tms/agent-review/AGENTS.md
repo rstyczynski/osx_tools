@@ -89,8 +89,9 @@ from a directory name, `.gitignore` entry, or file extension alone.
 
 Typical candidates include Swift `.build` trees, installed Terraform provider
 downloads, unmodified model weights at a recorded revision, and dependency caches.
-Python environments are candidates only when their dependencies and relevant
-customizations can be reconstructed.
+The default `*venv/` rule excludes virtual-environment directories. Check that
+their dependencies and relevant customizations can be reconstructed; propose a
+local include for an environment containing unique changes that must be retained.
 
 Keep original recordings, saved meeting records, edited transcripts, annotations,
 reference judgments, source code, Git history, lockfiles, acquisition manifests,

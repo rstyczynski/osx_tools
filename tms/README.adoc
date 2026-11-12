@@ -115,10 +115,15 @@ bundled `excludes.default` with the same defaults:
 .cache/
 hf-cache/
 supertonic-cache/
+*venv/
 ----
 
-Only directories with these names and their descendants are excluded. There is
-no broad `*cache` rule, no automatic use of `.gitignore`, and no default exclusion
+Only directories matching these names/patterns and their descendants are excluded.
+`*venv/` matches directories ending in `venv`, including `.venv`, `mlx-venv`,
+and `tts-venv`, at any depth. It does not exclude a same-named ordinary file.
+Use a local include such as `!/tools/custom-venv/` if that environment must be kept.
+
+There is no broad `*cache` rule, no automatic use of `.gitignore`, and no default exclusion
 for Git history, Terraform state files, recordings, or arbitrary `local-data`.
 Excluding `.terraform/` skips its local initialization/backend metadata as well
 as provider downloads; keep actual state files and dependency lockfiles backed up.

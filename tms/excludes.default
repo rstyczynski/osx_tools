@@ -7,3 +7,4 @@
 .cache/
 hf-cache/
 supertonic-cache/
+*venv/
