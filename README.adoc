@@ -6,6 +6,11 @@ TimeMachine Simplified is a file backup tool. Supports full and incremental copi
 
 Version 1.5.1. See link:tms/README.adoc[the tms README] and link:tms/CHANGELOG.adoc[changelog].
 
+=== Features
+
+TMS also supports four-hour native launchd scheduling, SwiftBar menu actions, and emailed
+per-source summaries. See link:tms/README.adoc[the service setup documentation].
+
 === Usage
 
 ```
@@ -26,7 +31,3 @@ Target backup volume file systems supports hard links.
 
 === Limitations
 Does not support file removal. Deleted files are not recognized.
-
-
-TMS also supports four-hour native launchd scheduling, SwiftBar menu actions, and emailed
-per-source summaries. See link:tms/README.adoc[the service setup documentation].
