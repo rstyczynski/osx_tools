@@ -6,6 +6,7 @@ import fcntl
 import importlib.util
 import io
 import json
+import os
 from pathlib import Path
 import tempfile
 import time
@@ -48,6 +49,9 @@ class ServiceTest(unittest.TestCase):
         self.assertEqual([part.strip() for part in row.split("|")][3], "12")
 
     def setUp(self):
+        mail_environment = patch.dict(os.environ, {"TMS_EMAIL_ENABLED": "1"})
+        mail_environment.start()
+        self.addCleanup(mail_environment.stop)
         self.temp = tempfile.TemporaryDirectory(prefix="tms-service-", dir="/tmp")
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name).resolve()
@@ -96,6 +100,40 @@ class ServiceTest(unittest.TestCase):
                 self.assertEqual(self.invoke(["--all"]), 0)
                 email.assert_not_called()
         self.assertEqual(before, (self.config["state_dir"] / "status.json").read_text())
+
+    def test_email_disabled_keeps_backup_and_summary_without_mail(self):
+        with patch.dict(os.environ, {"TMS_EMAIL_ENABLED": "0", "TMS_REPORT_EMAIL": ""}):
+            with patch.object(service, "send_email") as email:
+                self.assertEqual(self.invoke(["--source", str(self.source)]), 0)
+                email.assert_not_called()
+            with patch.object(service.subprocess, "run") as command:
+                self.assertIs(service.send_email(self.config, self.root / "missing-summary", "test"), False)
+                command.assert_not_called()
+            with patch.object(service, "send_email") as email:
+                self.assertEqual(self.invoke(["--test-email"]), 0)
+                email.assert_not_called()
+        state = json.loads((self.config["state_dir"] / "status.json").read_text())
+        self.assertEqual(state["email"], "disabled (TMS_EMAIL_ENABLED=0)")
+        self.assertTrue((self.config["state_dir"] / "last-summary.txt").is_file())
+        self.assertFalse(list(self.config["log_dir"].glob("*.email.txt")))
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            service.menu()
+        self.assertIn("Email: disabled (TMS_EMAIL_ENABLED=0)", out.getvalue())
+
+    def test_email_switch_values(self):
+        for value in ("0", "false", "NO", " off "):
+            with patch.dict(os.environ, {"TMS_EMAIL_ENABLED": value}):
+                self.assertFalse(service.email_enabled())
+        for value in ("1", "true", "YES", " on "):
+            with patch.dict(os.environ, {"TMS_EMAIL_ENABLED": value}):
+                self.assertTrue(service.email_enabled())
+        with patch.dict(os.environ, {"TMS_EMAIL_ENABLED": "typo"}):
+            with self.assertRaises(ValueError):
+                service.email_enabled()
+        with patch.dict(os.environ):
+            os.environ.pop("TMS_EMAIL_ENABLED", None)
+            self.assertTrue(service.email_enabled())
 
     def test_email_failure_visible(self):
         with patch.object(service, "send_email", side_effect=RuntimeError("test mail error")):

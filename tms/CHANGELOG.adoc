@@ -1,5 +1,9 @@
 = Changelog
 
+== Unreleased
+
+* Add `TMS_EMAIL_ENABLED=0` to disable report delivery and all Apple Mail interaction, including setup email tests. Backups and local reports continue, with disabled email shown in logs and SwiftBar. Unset retains enabled behavior.
+
 == 1.7.0 — 2026-11-12
 
 * Add read-only `tms --estimate SOURCE [--json]` for total/included/excluded entry counts and logical byte sizes using the active exclusion policy.

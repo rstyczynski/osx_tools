@@ -104,7 +104,18 @@ def email_body(summary):
     return "\n".join(metadata) + "\n\n" + prefix + "\n".join(table) + "\n\n" + "\n".join(lines[end:]) + "\n"
 
 
+def email_enabled():
+    value = os.environ.get("TMS_EMAIL_ENABLED", "1").strip().lower()
+    if value in ("0", "false", "no", "off"):
+        return False
+    if value in ("1", "true", "yes", "on"):
+        return True
+    raise ValueError("TMS_EMAIL_ENABLED must be 1/on/true/yes or 0/off/false/no")
+
+
 def send_email(config, summary_file, subject):
+    if not email_enabled():
+        return False  # Do not create email files or contact Apple Mail.
     recipient = os.environ.get("TMS_REPORT_EMAIL", "")
     if not recipient or any(c in recipient for c in "\r\n"):
         raise RuntimeError("TMS_REPORT_EMAIL is missing or invalid; export it in ~/.bash_profile")
@@ -146,6 +157,7 @@ def run_backup(arguments):
     config = configuration()
     if arguments == ["--check-access"]:
         return check_access(config)
+    mail_enabled = email_enabled()
     state_dir, log_dir = config["state_dir"], config["log_dir"]
     state_dir.mkdir(parents=True, exist_ok=True)
     log_dir.mkdir(parents=True, exist_ok=True)
@@ -226,8 +238,12 @@ def run_backup(arguments):
             state["inventory_error"] = str(error)
         save_state(config, state)
         try:
-            send_email(config, summary_file, "[TMS] " + ("setup test" if email_test else state["status"]) + " — " + finished.strftime("%Y-%m-%d %H:%M"))
-            state["email"] = "submitted to Apple Mail"
+            if mail_enabled:
+                send_email(config, summary_file, "[TMS] " + ("setup test" if email_test else state["status"]) + " — " + finished.strftime("%Y-%m-%d %H:%M"))
+                state["email"] = "submitted to Apple Mail"
+            else:
+                state["email"] = "disabled (TMS_EMAIL_ENABLED=0)"
+                print("Email: " + state["email"])
         except Exception as error:
             state["email"] = "FAILED: " + str(error)
             print(state["email"], file=sys.stderr)

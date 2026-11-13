@@ -442,7 +442,18 @@ Add your report recipient to the noninteractive login environment:
 ----
 # In ~/.bash_profile:
 export TMS_REPORT_EMAIL="you@example.com"
+export TMS_EMAIL_ENABLED=0  # Disable all Mail interaction and report delivery.
 ----
+
+`TMS_EMAIL_ENABLED=0` skips email formatting and Apple Mail automation entirely,
+including `--test-email`. Backups, local summaries, and SwiftBar status continue;
+the run log and menu report email as disabled, without treating it as a failure.
+Set `TMS_EMAIL_ENABLED=1` to enable email again. Accepted values are
+`1/on/true/yes` and `0/off/false/no` (case insensitive); an unset variable defaults
+to enabled for compatibility. Invalid values fail before a backup starts.
+Scheduled and SwiftBar-triggered runs load this setting from `~/.bash_profile`
+on their next invocation; no scheduler reinstall is needed. For a direct helper
+invocation from an existing terminal, source the updated profile first.
 
 `tms-run.sh --all` loads `.bash_profile`, explicitly sources `tms.sh`, and runs
 `tms --all`. It never sources interactive `.bashrc`. It also accepts
@@ -456,7 +467,7 @@ a compact aligned table. Common source-directory prefixes appear once above the
 table; full paths remain in the unmodified plain-text summary and logs. The
 formatted email body is retained alongside the summary as `.summary.email.txt`.
 
-Each completed run submits its final per-source summary through the already
+When email is enabled, each completed run submits its final per-source summary through the already
 configured Apple Mail account. No SMTP passwords are stored by TMS. Emails
 include scheduler enabled/loaded/runtime state, configured hours/timezone,
 next expected run, and wake behavior, even for manual runs while scheduling is
