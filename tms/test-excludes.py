@@ -22,7 +22,9 @@ class ExclusionTest(unittest.TestCase):
         self.source.mkdir()
         self.central = self.base / "central"
         self.central.write_text(".build/\n.models/\n.cache/\n*.tmp\n")
-        env = patch.dict(os.environ, {"TMS_EXCLUDES_FILE": str(self.central)})
+        env = patch.dict(os.environ, {"TMS_EXCLUDES_FILE": str(self.central),
+                                     "TMS_STATE_DIR": str(self.base / "state"),
+                                     "TMS_LOG_DIR": str(self.base / "logs")})
         env.start()
         self.addCleanup(env.stop)
 

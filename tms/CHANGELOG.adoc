@@ -1,5 +1,10 @@
 = Changelog
 
+== 1.8.3 — 2026-11-15
+
+* Save terminal backup summaries, including partial results and diagnostics, alongside service reports. Do not overwrite the state of a running service job or send terminal report emails.
+* Show a separate current service-log action while a backup runs. Label the last completed report with its origin and completion time, and open its timestamped file instead of a reusable editor buffer. Preserve historical reports.
+
 == 1.8.2 — 2026-11-15
 
 * Refresh SwiftBar source inventory directly from destination metadata on every menu refresh, so manually registered parents and current snapshot timestamps appear immediately. Show active sources first and mark retired, pending, and partial entries.

@@ -27,6 +27,7 @@ class ConsolidationTest(unittest.TestCase):
         self.central.write_text("")
         self.env = dict(os.environ, backup_volume=str(self.volume),
                         TMS_EXCLUDES_FILE=str(self.central), TMS_STATE_DIR=str(self.base / "state"),
+                        TMS_LOG_DIR=str(self.base / "logs"),
                         PATH="/opt/homebrew/bin:" + os.environ["PATH"])
         result = self.tms(str(self.child))
         self.assertEqual(result.returncode, 0, result.stdout)
@@ -101,7 +102,7 @@ class ConsolidationTest(unittest.TestCase):
 
     def test_scheduled_lock_blocks_execution(self):
         state = Path(self.env["TMS_STATE_DIR"])
-        state.mkdir()
+        state.mkdir(exist_ok=True)
         with (state / "run.lock").open("a+") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             result = self.consolidate()

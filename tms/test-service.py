@@ -221,6 +221,40 @@ class ServiceTest(unittest.TestCase):
         self.assertNotIn("removed-source", menu)
         self.assertEqual(spawn.call_args[0][0][-2:], ["--source", str(source)])
 
+    def test_current_log_and_completed_reports_are_separate(self):
+        state, logs = self.config["state_dir"], self.config["log_dir"]
+        state.mkdir()
+        logs.mkdir()
+        log = logs / "current.log"
+        log.write_text("Creating hard links...\n")
+        older = logs / "older.summary.txt"
+        text = "TMS backup report\nFinished: 2026-11-15T16:01:14+01:00\nLog: " + str(logs / "older.log") + "\n"
+        older.write_text(text)
+        (state / "last-summary.txt").write_text(text)
+        service.save_state(self.config, {"status": "RUNNING", "started": "2026-11-15T20:00:22+01:00", "log": str(log)})
+        previous = (state / "status.json").read_bytes()
+        with (state / "run.lock").open("a+") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                service.menu()
+            self.assertIn("Open current backup log · started 2026-11-15T20:00:22", out.getvalue())
+            self.assertIn("Last completed report · service · 2026-11-15T16:01:14", out.getvalue())
+            self.assertIn(str(older), out.getvalue())
+            # Terminal completion must not replace an active service's run state.
+            service.record_terminal(self.config, "FINAL BACKUP REPORT\n/tmp/Documents | PARTIAL | done with warnings\n")
+            self.assertEqual((state / "status.json").read_bytes(), previous)
+            completed, title = service.completed_report(self.config)
+            self.assertIn("terminal", title)
+            self.assertNotEqual(completed, state / "last-summary.txt")
+            self.assertIn("PARTIAL", completed.read_text())
+            self.assertEqual(older.read_text(), text)
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                service.menu()
+            self.assertIn("Last completed report · terminal", out.getvalue())
+            self.assertIn("Open current backup log", out.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main()

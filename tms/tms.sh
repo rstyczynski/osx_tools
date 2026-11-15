@@ -12,7 +12,7 @@ function tms() {
   fi
   case "$src_dir" in
     ''|-h|--help) usage; return 0 ;;
-    --version) printf 'TimeMachine Simplified 1.8.2\n'; return 0 ;;
+    --version) printf 'TimeMachine Simplified 1.8.3\n'; return 0 ;;
     --scheduler|--swiftbar|--switfbar|--access)
       if [[ $# -gt 2 ]]; then
         printf 'Usage: tms %s [on|off|status] (access: setup|status)\n' "$src_dir" >&2
@@ -354,6 +354,21 @@ function _tms_report_add() {
 }
 
 function _tms_report_print() {
+  if [[ ${_tms_service_run:-no} = yes ]]; then
+    _tms_report_render
+    return $?
+  fi
+  local report_file
+  report_file=$(mktemp "${TMPDIR:-/tmp}/tms-report.XXXXXX") || { _tms_report_render; return; }
+  _tms_report_render | tee "$report_file"
+  if ! TMS_BACKUP_VOLUME="${backup_volume:-/Volumes/Backup}" /usr/bin/python3 -B \
+    "$_TMS_SCRIPT_DIR/tms-service.py" record-terminal < "$report_file"; then
+    printf 'Warning: backup report could not be saved for SwiftBar.\n' >&2
+  fi
+  rm -f "$report_file"
+}
+
+function _tms_report_render() {
   local width=6 i source detail ok=0 failed=0 skipped=0 partial=0 warning_log
   for ((i=0; i<_tms_report_count; i++)); do
     source=${_tms_report_sources[i]}
@@ -608,7 +623,7 @@ function tms_restore() {
 function usage() {
   cat <<EOF
 
-TimeMachine Simplified 1.8.2
+TimeMachine Simplified 1.8.3
 
 Usage:
 backup_volume=/Volumes/Backup

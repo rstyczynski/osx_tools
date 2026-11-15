@@ -6,6 +6,8 @@ fixture=$(cd "$fixture" && pwd -P)
 trap 'rm -rf "$fixture"' EXIT
 export PATH="/opt/homebrew/bin:$PATH"
 export TMS_EXCLUDES_FILE="$fixture/central-excludes"
+export TMS_STATE_DIR="$fixture/state"
+export TMS_LOG_DIR="$fixture/logs"
 : > "$TMS_EXCLUDES_FILE"
 backup_volume="$fixture/destination"
 mkdir -p "$fixture/source one" "$fixture/source two"
@@ -13,6 +15,9 @@ printf 'original\n' > "$fixture/source one/file"
 printf 'second\n' > "$fixture/source two/file"
 tms "$fixture/source one" > "$fixture/output"
 tms "$fixture/source two" >> "$fixture/output"
+grep -q 'Origin: terminal' "$TMS_STATE_DIR/last-summary.txt"
+grep -q "$fixture/source two" "$TMS_STATE_DIR/last-summary.txt"
+test ! -e "$TMS_STATE_DIR/status.json"
 grep -q "backup_volume=$backup_volume" "$fixture/output"
 [[ $(cat "$backup_volume/backup/source one/.source") = "$fixture/source one" ]]
 # Parent and child overlaps stop before creating any destination label/snapshot.
@@ -133,7 +138,7 @@ grep -q 'Sources: 0' "$fixture/output"
 # Bare invocation and informational options must not start backups.
 tms > "$fixture/output"
 grep -q 'With no arguments' "$fixture/output"
-tms --version | grep -q '1.8.2'
+tms --version | grep -q '1.8.3'
 tms --help > "$fixture/output"
 if tms --unknown > "$fixture/output" 2>&1; then exit 1; fi
 if tms --all extra > "$fixture/output" 2>&1; then exit 1; fi

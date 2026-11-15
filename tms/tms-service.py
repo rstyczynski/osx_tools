@@ -37,6 +37,43 @@ def save_state(config, state):
     atomic_text(config["state_dir"] / "status.json", json.dumps(state, indent=2) + "\n")
 
 
+def record_terminal(config, report):
+    """Persist a completed terminal report without changing an active service run."""
+    finished = dt.datetime.now().astimezone()
+    config["state_dir"].mkdir(parents=True, exist_ok=True)
+    config["log_dir"].mkdir(parents=True, exist_ok=True)
+    path = config["log_dir"] / (finished.strftime("%Y-%m-%dT%H%M%S.%f") + "-terminal-" + str(os.getpid()) + ".summary.txt")
+    summary = ("TMS terminal backup report — " + socket.gethostname() + "\n"
+               + "Origin: terminal\nFinished: " + finished.isoformat(timespec="seconds") + "\n"
+               + "Destination: " + config["backup_volume"] + "\n\n" + report
+               + "\nReport: " + str(path) + "\n")
+    atomic_text(path, summary)
+    atomic_text(config["state_dir"] / "last-summary.txt", summary)
+
+
+def completed_report(config):
+    """Link to a timestamped report, rather than an editor's stale alias buffer."""
+    alias = config["state_dir"] / "last-summary.txt"
+    if not alias.is_file():
+        return None
+    text = alias.read_text()
+    origin, finished, target = "service", "unknown time", alias
+    for line in text.splitlines():
+        if line.startswith("Origin: "):
+            origin = line[len("Origin: "):]
+        elif line.startswith("Finished: "):
+            finished = line[len("Finished: "):]
+        elif line.startswith("Report: "):
+            candidate = Path(line[len("Report: "):])
+            if candidate.is_file():
+                target = candidate
+        elif line.startswith("Log: "):
+            candidate = Path(line[len("Log: "):]).with_suffix(".summary.txt")
+            if candidate.is_file():
+                target = candidate
+    return target, "Last completed report · " + origin + " · " + finished
+
+
 def environment(config):
     env = os.environ.copy()
     env["PATH"] = "/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:" + env.get("PATH", "")
@@ -234,7 +271,7 @@ def run_backup(arguments):
         except Exception as error:
             schedule = "Scheduler: status unavailable — " + str(error)
         summary = ("TMS " + ("setup email test" if email_test else "backup report") + " — " + socket.gethostname() + "\n"
-                   + "Started: " + started.isoformat(timespec="seconds") + "\n"
+                   + "Origin: service\nStarted: " + started.isoformat(timespec="seconds") + "\n"
                    + "Finished: " + finished.isoformat(timespec="seconds") + "\n"
                    + "Destination: " + config["backup_volume"] + "\n"
                    + schedule + "\n"
@@ -316,9 +353,13 @@ def menu():
         else:
             print("--Original source unknown; cannot back up")
     print("---")
-    summary = config["state_dir"] / "last-summary.txt"
-    if summary.exists():
-        print("Open last summary | bash=/usr/bin/open param1=" + shlex.quote(str(summary)) + " terminal=false")
+    if active and state.get("status") == "RUNNING" and state.get("log"):
+        print("Open current backup log · started " + display(state.get("started", "unknown time"))
+              + " | bash=/usr/bin/open param1=" + shlex.quote(state["log"]) + " terminal=false")
+    completed = completed_report(config)
+    if completed:
+        summary, title = completed
+        print(display(title) + " | bash=/usr/bin/open param1=" + shlex.quote(str(summary)) + " terminal=false")
     print("Open logs | bash=/usr/bin/open param1=" + shlex.quote(str(config["log_dir"])) + " terminal=false")
     print("Refresh | refresh=true")
 
@@ -351,6 +392,8 @@ if __name__ == "__main__":
         mode = sys.argv[1] if len(sys.argv) > 1 else "menu"
         if mode == "run":
             sys.exit(run_backup(sys.argv[2:]))
+        elif mode == "record-terminal":
+            record_terminal(configuration(), sys.stdin.read())
         elif mode == "menu":
             menu()
         elif mode == "start" and len(sys.argv) == 3:
