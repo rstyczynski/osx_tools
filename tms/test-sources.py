@@ -107,7 +107,7 @@ class ConsolidationTest(unittest.TestCase):
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             result = self.consolidate()
         self.assertNotEqual(result.returncode, 0, result.stdout)
-        self.assertIn("Another TMS run is active", result.stdout)
+        self.assertIn("Another TMS backup is running", result.stdout)
         self.assert_active_history()
 
     def test_successful_transfer_with_missing_entries_does_not_retire(self):

@@ -1,6 +1,6 @@
 = TimeMachine Simplified (tms)
 
-Version 1.8.4. Bash functions for full and incremental directory backups.
+Version 1.8.5. Bash functions for full and incremental directory backups.
 
 == Setup
 
@@ -55,6 +55,22 @@ failures remain `FAILED` and do not publish a new `latest`.
 Missing or unrecognizable sources are reported; the other sources still run.
 The command returns nonzero if any active source fails or cannot be identified,
 or no sources are known. Retired sources are intentional skips and do not cause failure.
+
+=== Engine locking
+
+All backup entry points acquire the same engine-owned kernel mutex in
+`tms_lock.py`: `tms SOURCE`, `tms SOURCE full`, `--all`, `tms_batch`,
+consolidation/resume, and scheduled/menu/wrapper runs. This deliberately
+serializes all TMS backup jobs using the same local `TMS_STATE_DIR` (normally
+`~/Library/Application Support/tms`). A second terminal writer returns exit 75
+before creating/resuming a snapshot; duplicate service requests are skipped.
+
+Internal calls inherit and verify the held descriptor for `run.lock`; a service
+flag alone cannot bypass the mutex. The lock remains held until the last worker
+copy of the descriptor closes, including after coordinator death. Do not delete
+or replace `run.lock`: its existence does not mean it is held. `engine-owner.json`
+is display metadata, while the kernel lock is authoritative. Read-only help,
+inventory, estimates, explanations, and consolidation previews remain available.
 
 === Retired sources
 
@@ -124,8 +140,8 @@ marker records its completed retirement. Rerun consolidation for the remaining
 active children. A failed or interrupted parent attempt may leave an unpublished
 snapshot directory; it is never promoted merely to finish consolidation.
 
-Execution holds the scheduler's existing run lock. Wait for independent manual
-backups to finish before starting consolidation. A source already covered by an
+Execution uses the same engine lock as manual and scheduled backups. A competing
+writer is rejected before copying or changing source state. A source already covered by an
 active ancestor must keep using that ancestor; consolidation only replaces
 descendants. An unknown active label or missing child blocks consolidation
 until its source metadata or availability is resolved.
@@ -355,7 +371,7 @@ into that directory, retaining its stored absolute-path tree.
 
 The following metadata behavior and correctness bugs were checked on macOS with
 GNU rsync 3.4.1 on 2026-11-12 using temporary full-backup, restore, and incremental
-cycles. The two correctness bugs remain in version 1.8.4. Version 1.6.0 adds
+cycles. The two correctness bugs remain in version 1.8.5. Version 1.6.0 adds
 policy filtering and captures new included empty directories; it does not repair
 historical metadata or the rsync content quick-check bug.
 
@@ -543,8 +559,8 @@ invocation from an existing terminal, source the updated profile first.
 `tms-run.sh --all` loads `.bash_profile`, explicitly sources `tms.sh`, and runs
 `tms --all`. It never sources interactive `.bashrc`. It also accepts
 `--source /absolute/path` for a single source. A kernel file lock prevents two
-wrapper runs from overlapping and releases on exit or crash. Direct calls to
-`tms` bypass the wrapper lock.
+backup writers from overlapping at the TMS engine level. Direct terminal calls
+use that same lock; the wrapper does not supply a separate locking policy.
 
 Emails use Apple Mail rich text (HTML with a plain-text alternative), Courier
 at 11 points with a bold heading, an overview of totals, and
@@ -589,7 +605,8 @@ This control covers scheduler/menu/wrapper jobs; independent terminal backups
 are outside that tracked process tree. Stopping a run leaves the scheduler enabled.
 
 The service still caches paths after runs for click handling; a new label missing
-from that cache is resolved from current backup metadata. Overall run status describes service-managed runs. Direct terminal backups save
+from that cache is resolved from current backup metadata. While the engine mutex is held, the menu identifies its active owner as terminal,
+service, or consolidation; an old service state is not shown as a new terminal run. Direct terminal backups save
 their final report too and update the completed-report link, including warnings,
 without changing a running service job's status. Reload `tms.sh` in existing
 terminals after updating to enable report persistence. Reports from terminal
@@ -605,6 +622,10 @@ To stop automatic operation, run `tms --scheduler off` and `tms --swiftbar off`.
 The helper, access grant, snapshots, settings, and logs remain for reuse.
 
 === Service tests
+
+`python3 -B test-engine-lock.py` exercises real concurrent terminal/service calls,
+full/all/batch/consolidation entry points, descriptor/flag spoofing, lock retention
+after coordinator death, and release after the final fixture worker exits.
 
 `python3 -B test-hard-stop.py` runs an isolated process-group integration test:
 it stops only a temporary backup fixture, checks an unrelated fixture survives,

@@ -4,6 +4,39 @@
 _TMS_SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 function tms() {
+  case "${1:-}" in
+    ''|-h|--help|--version|--sources|--estimate|--explain|--scheduler|--swiftbar|--switfbar|--access)
+      _tms_main "$@"; return $? ;;
+    --consolidate)
+      if [[ ${3:-} = --dry-run && $# = 3 ]]; then
+        _tms_main "$@"; return $?
+      fi
+      ;;
+  esac
+  _tms_engine_run tms "$@"
+}
+
+function _tms_engine_run() {
+  local mode="$1"
+  shift
+  if /usr/bin/python3 -B "$_TMS_SCRIPT_DIR/tms_lock.py" check; then
+    if [[ "$mode" = batch ]]; then _tms_batch_main "$@"; else _tms_main "$@"; fi
+    return $?
+  fi
+  (
+    # Preserve supported shell overrides without modifying the caller's exports.
+    local utility
+    for utility in rsync gcp; do
+      if declare -F "$utility" >/dev/null; then export -f "$utility"; fi
+    done
+    export backup_volume="${backup_volume:-/Volumes/Backup}"
+    export _tms_service_run="${_tms_service_run:-no}"
+    export _tms_skip_retired="${_tms_skip_retired:-no}"
+    /usr/bin/python3 -B "$_TMS_SCRIPT_DIR/tms_lock.py" "$mode" "$@"
+  )
+}
+
+function _tms_main() {
   local src_dir="${1:-}"
   local full="${2:-no}"
 
@@ -12,7 +45,7 @@ function tms() {
   fi
   case "$src_dir" in
     ''|-h|--help) usage; return 0 ;;
-    --version) printf 'TimeMachine Simplified 1.8.4\n'; return 0 ;;
+    --version) printf 'TimeMachine Simplified 1.8.5\n'; return 0 ;;
     --scheduler|--swiftbar|--switfbar|--access)
       if [[ $# -gt 2 ]]; then
         printf 'Usage: tms %s [on|off|status] (access: setup|status)\n' "$src_dir" >&2
@@ -186,6 +219,11 @@ function _tms_check_overlap() {
 
 function _tms_backup_source() {
   local src_dir="$1" full="$2"
+  if ! /usr/bin/python3 -B "$_TMS_SCRIPT_DIR/tms_lock.py" check; then
+    _tms_result_detail='Engine lock required; invoke backups through tms'
+    printf '%s\n' "$_tms_result_detail" >&2
+    return 1
+  fi
   _tms_source_header "$src_dir"
   # Resolve aliases even if the source is now missing: retirement still applies.
   src_dir=$(/usr/bin/python3 -B -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "$src_dir") || return 1
@@ -623,7 +661,7 @@ function tms_restore() {
 function usage() {
   cat <<EOF
 
-TimeMachine Simplified 1.8.4
+TimeMachine Simplified 1.8.5
 
 Usage:
 backup_volume=/Volumes/Backup
@@ -639,6 +677,7 @@ tms --access setup|status
 tms --help
 tms --version
 
+All backup entry points share the engine lock; concurrent writers are rejected.
 Use --all to back up every source already known at the destination.
 With no arguments, display this help without starting a backup.
 Current backup_volume: ${backup_volume:-/Volumes/Backup}
@@ -649,6 +688,10 @@ EOF
 
 
 function tms_batch() {
+  _tms_engine_run batch "${1:-$HOME/etc/tms_config}"
+}
+
+function _tms_batch_main() {
   local _tms_skip_retired=yes
   local config_file=${1:-"$HOME/etc/tms_config"}
   if [[ ! -f "$config_file" ]]; then

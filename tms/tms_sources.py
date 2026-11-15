@@ -2,7 +2,6 @@
 """Consolidate descendant backup sources without deleting their history."""
 import argparse
 import datetime as dt
-import fcntl
 import itertools
 import json
 import os
@@ -15,6 +14,7 @@ import sys
 import tempfile
 
 from tms_excludes import Policy, walk
+from tms_lock import EngineBusy, engine_lock, inherited_lock, FD_ENV
 
 ROOT = Path(__file__).resolve().parent
 
@@ -145,6 +145,8 @@ def write_pending(path, parent, snapshot):
 
 
 def consolidate(parent, volume, dry_run=False, lock_fd=None):
+    if not dry_run and inherited_lock(fd=lock_fd) is None:
+        raise ValueError("Engine lock required before consolidating sources")
     parent = Path(parent).resolve()
     backup = Path(volume).resolve() / "backup"
     if not parent.is_dir() or not parent.name:
@@ -185,7 +187,8 @@ def consolidate(parent, volume, dry_run=False, lock_fd=None):
     result = subprocess.run(
         ["/bin/bash", "-c", 'source "$1"; _tms_consolidation_parent=$2; _tms_resume_snapshot=$3; tms "$2"',
          "tms", str(ROOT / "tms.sh"), str(parent), str(snapshot)],
-        env=dict(os.environ, backup_volume=str(Path(volume).resolve())),
+        env=dict(os.environ, backup_volume=str(Path(volume).resolve()),
+                 **({FD_ENV: str(lock_fd)} if lock_fd is not None else {})),
         pass_fds=() if lock_fd is None else (lock_fd,))
     if result.returncode:
         raise ValueError("Parent backup failed. No children retired; existing child backups remain active")
@@ -204,7 +207,7 @@ def consolidate(parent, volume, dry_run=False, lock_fd=None):
             print("Old child histories are retained. The next normal backup retries missing or changed entries.")
         else:
             raise
-    # Partial coverage gaps are warnings. Finish the handoff while holding the lock.
+    # Partial coverage gaps are warnings. Finish the handoff under the engine lock.
     pending.unlink()
     record = {"replacement": str(parent), "retired_at": dt.datetime.now().astimezone().isoformat(),
               "replacement_snapshot": snapshot.name,
@@ -227,16 +230,10 @@ def main():
         if args.dry_run:
             consolidate(args.parent, volume, True)
         else:
-            # Share the scheduler's lock; independent manual commands must also be idle.
-            state = Path(os.environ.get("TMS_STATE_DIR", Path.home() / "Library/Application Support/tms"))
-            state.mkdir(parents=True, exist_ok=True)
-            with (state / "run.lock").open("a+") as lock:
-                try:
-                    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                except BlockingIOError:
-                    raise ValueError("Another TMS run is active; wait for it to finish and retry")
-                consolidate(args.parent, volume, lock_fd=lock.fileno())
-    except (OSError, ValueError) as error:
+            # The same engine mutex covers CLI, batches, service, and consolidation.
+            with engine_lock(kind="consolidation") as lock_fd:
+                consolidate(args.parent, volume, lock_fd=lock_fd)
+    except (OSError, ValueError, EngineBusy) as error:
         print("Error: %s" % error, file=sys.stderr)
         print("Existing snapshots have not been deleted. Any completed retirement is recorded in its child's .retired file.", file=sys.stderr)
         return 1

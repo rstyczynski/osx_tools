@@ -4,7 +4,7 @@
 
 TimeMachine Simplified is a file backup tool. Supports full and incremental copies, with a final report showing one row per source.
 
-Version 1.8.4. See link:tms/README.adoc[the tms README] and link:tms/CHANGELOG.adoc[changelog].
+Version 1.8.5. See link:tms/README.adoc[the tms README] and link:tms/CHANGELOG.adoc[changelog].
 
 === Features
 
@@ -22,7 +22,7 @@ Version 1.8.4. See link:tms/README.adoc[the tms README] and link:tms/CHANGELOG.a
 * *Snapshot restore* to a separate destination.
 * *Agent-assisted source optimization* through an optional review guide and example prompts for your own agentic layer.
 * *Guided macOS access setup* and an automated background-access check.
-* *Overlap protection* for scheduled and menu-triggered backups, with saved logs and summaries.
+* *Engine-wide locking* for terminal, full, batch, consolidation, scheduled, and menu backups, with saved logs and summaries.
 
 See link:tms/README.adoc[the TMS documentation] for commands and setup.
 
@@ -59,4 +59,4 @@ Target backup volume file systems supports hard links.
 * Restore copies the stored snapshot and absolute-path tree into a new destination.
 
 See link:tms/README.adoc#limitations[the verified limitations and known correctness bugs]
-for details. The two correctness bugs remain present in version 1.8.4.
+for details. The two correctness bugs remain present in version 1.8.5.

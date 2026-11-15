@@ -1,5 +1,11 @@
 = Changelog
 
+== 1.8.5 — 2026-11-15
+
+* Enforce one engine-owned kernel mutex for every backup entry point: plain/full terminal calls, all-source runs, configuration batches, consolidation/resume, scheduler, and SwiftBar. Reject concurrent CLI writes with exit 75 before snapshot mutations.
+* Reuse only a verified inherited descriptor for the actual mutex; service flags cannot bypass locking. Workers retain the lock even if their coordinator dies. Keep read-only commands available.
+* Show the active engine owner in SwiftBar so a terminal backup is not confused with a previous service run. Add real CLI/service concurrency, spoofed-descriptor, nested-call, and coordinator-death checks.
+
 == 1.8.4 — 2026-11-15
 
 * Add SwiftBar hard-stop control for the current service backup: validate runner identity and menu PID, freeze the coordinator, SIGKILL its process groups/descendants, release the run lock, and record STOPPED with a timestamped report. Preserve working and historical snapshots.

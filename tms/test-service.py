@@ -314,6 +314,19 @@ class ServiceTest(unittest.TestCase):
         self.assertEqual(kill.call_args_list, [unittest.mock.call(424242, signal.SIGSTOP), unittest.mock.call(424242, signal.SIGCONT)])
         killpg.assert_not_called()
 
+    def test_terminal_engine_lock_is_not_presented_as_old_service_run(self):
+        state = self.config["state_dir"]
+        state.mkdir()
+        service.save_state(self.config, {"status": "STOPPED", "pid": 424242, "finished": "old service time"})
+        (state / "engine-owner.json").write_text(json.dumps({"kind": "terminal", "pid": 999999, "started": "new terminal time"}))
+        out = io.StringIO()
+        with patch.object(service, "backup_active", return_value=True), contextlib.redirect_stdout(out):
+            service.menu()
+        self.assertIn("RUNNING (terminal) · new terminal time", out.getvalue())
+        self.assertNotIn("old service time", out.getvalue())
+        self.assertNotIn("param2=stop", out.getvalue())
+        self.assertNotIn("Open current backup log", out.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main()

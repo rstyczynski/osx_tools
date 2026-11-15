@@ -51,6 +51,9 @@ with tempfile.TemporaryDirectory(prefix='tms-hardstop-live-', dir='/tmp') as tem
                 assert service.hard_stop(runner.pid) == 0
             assert runner.wait(timeout=5) == -signal.SIGKILL
             assert sentinel.poll() is None, 'Unrelated process was stopped'
+            deadline = time.monotonic() + 3
+            while service.backup_active(config) and time.monotonic() < deadline:
+                time.sleep(.02)
             assert not service.backup_active(config), 'Backup lock still held'
             state = json.loads((base / 'state/status.json').read_text())
             assert state['status'] == 'STOPPED'

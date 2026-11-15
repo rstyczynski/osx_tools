@@ -13,6 +13,7 @@ import socket
 import subprocess
 import sys
 from tms_manage import scheduler_description
+from tms_lock import EngineBusy, engine_lock, inherited_lock, FD_ENV
 
 ROOT = Path(__file__).resolve().parent
 HOME = Path.home()
@@ -188,6 +189,8 @@ def environment(config):
     env = os.environ.copy()
     env["PATH"] = "/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:" + env.get("PATH", "")
     env["backup_volume"] = config["backup_volume"]
+    env["TMS_STATE_DIR"] = str(config["state_dir"])
+    env["TMS_LOG_DIR"] = str(config["log_dir"])
     return env
 
 
@@ -316,104 +319,110 @@ def run_backup(arguments):
     config = configuration()
     if arguments == ["--check-access"]:
         return check_access(config)
+    try:
+        with engine_lock(config["state_dir"], kind="service") as lock_fd:
+            return run_locked_backup(config, arguments, lock_fd)
+    except EngineBusy:
+        print("TMS is already running; duplicate request skipped.")
+        return 0
+
+
+def run_locked_backup(config, arguments, lock_fd):
+    if inherited_lock(config["state_dir"], fd=lock_fd) is None:
+        raise ValueError("Engine lock required before starting a service backup")
     mail_enabled = email_enabled()
     state_dir, log_dir = config["state_dir"], config["log_dir"]
     state_dir.mkdir(parents=True, exist_ok=True)
     log_dir.mkdir(parents=True, exist_ok=True)
-    # The kernel releases this lock after normal exit, termination, or a crash.
-    with (state_dir / "run.lock").open("a+") as lock:
-        try:
-            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            print("TMS is already running; duplicate request skipped.")
-            return 0
-        if not arguments:
-            arguments = ["--all"]
-        email_test = arguments == ["--test-email"]
-        if not email_test and not (arguments == ["--all"] or (len(arguments) == 2 and arguments[0] == "--source")):
-            raise ValueError("Usage: tms-run.sh [--all | --source PATH | --test-email]")
-        started = dt.datetime.now().astimezone()
-        log = log_dir / (started.strftime("%Y-%m-%dT%H%M%S") + "-" + str(os.getpid()) + ".log")
-        state = {"status": "RUNNING", "pid": os.getpid(), "started": started.isoformat(timespec="seconds"),
-                 "scope": arguments[-1], "log": str(log)}
-        try:
-            state["runner_birth"] = process_table(os.getpid())[os.getpid()]["birth"]
-        except (OSError, subprocess.SubprocessError, KeyError):
-            pass
-        save_state(config, state)
-        child = None
+    if not arguments:
+        arguments = ["--all"]
+    email_test = arguments == ["--test-email"]
+    if not email_test and not (arguments == ["--all"] or (len(arguments) == 2 and arguments[0] == "--source")):
+        raise ValueError("Usage: tms-run.sh [--all | --source PATH | --test-email]")
+    started = dt.datetime.now().astimezone()
+    log = log_dir / (started.strftime("%Y-%m-%dT%H%M%S") + "-" + str(os.getpid()) + ".log")
+    state = {"status": "RUNNING", "pid": os.getpid(), "started": started.isoformat(timespec="seconds"),
+             "scope": arguments[-1], "log": str(log)}
+    try:
+        state["runner_birth"] = process_table(os.getpid())[os.getpid()]["birth"]
+    except (OSError, subprocess.SubprocessError, KeyError):
+        pass
+    save_state(config, state)
+    child = None
 
-        def interrupted(signum, frame):
-            if child and child.poll() is None:
-                os.killpg(child.pid, signal.SIGTERM)
-            raise RuntimeError("Backup interrupted by signal " + str(signum))
+    def interrupted(signum, frame):
+        if child and child.poll() is None:
+            os.killpg(child.pid, signal.SIGTERM)
+        raise RuntimeError("Backup interrupted by signal " + str(signum))
 
-        signal.signal(signal.SIGTERM, interrupted)
-        signal.signal(signal.SIGINT, interrupted)
-        output, exit_code = deque(maxlen=4000), 1
-        try:
-            if email_test:
-                output = ["FINAL BACKUP REPORT\n", "Setup test only — no backup was started.\n"]
-                output += ["{source} | {last}\n".format(source=x["source"] or x["label"] + " (unknown)", last=x["last"]) for x in sources(config)]
-                log.write_text("".join(output))
-                exit_code = 0
-            else:
-                tms_args = ["--all"] if arguments == ["--all"] else [arguments[1]]
-                command = ["/bin/bash", "-c", 'source "$1"; _tms_service_run=yes; shift; tms "$@"', "tms", str(ROOT / "tms.sh")] + tms_args
-                with log.open("w") as stream:
-                    child = subprocess.Popen(command, env=environment(config), stdout=subprocess.PIPE,
-                                             stderr=subprocess.STDOUT, text=True, errors="replace", start_new_session=True)
-                    for line in child.stdout:
-                        stream.write(line)
-                        stream.flush()
-                        print(line, end="", flush=True)
-                        output.append(line)
-                    exit_code = child.wait()
-        except Exception as error:
-            if child and child.poll() is None:
-                os.killpg(child.pid, signal.SIGTERM)
-                child.wait(timeout=20)
-            output.append("Runner error: " + str(error) + "\n")
-            with log.open("a") as stream:
-                stream.write(output[-1])
-        finished = dt.datetime.now().astimezone()
-        text = "".join(output)
-        index = text.rfind("FINAL BACKUP REPORT")
-        report = text[index:] if index >= 0 else "No final table was produced.\n" + text[-6000:]
-        try:
-            schedule = scheduler_description()
-        except Exception as error:
-            schedule = "Scheduler: status unavailable — " + str(error)
-        summary = ("TMS " + ("setup email test" if email_test else "backup report") + " — " + socket.gethostname() + "\n"
-                   + "Origin: service\nStarted: " + started.isoformat(timespec="seconds") + "\n"
-                   + "Finished: " + finished.isoformat(timespec="seconds") + "\n"
-                   + "Destination: " + config["backup_volume"] + "\n"
-                   + schedule + "\n"
-                   + "Backup exit status: " + str(exit_code) + "\n\n" + report + "\nLog: " + str(log) + "\n")
-        summary_file = log.with_suffix(".summary.txt")
-        summary_file.write_text(summary)
-        atomic_text(state_dir / "last-summary.txt", summary)
-        partial = any(len(parts) > 1 and parts[1].strip() == "PARTIAL"
-                      for parts in (line.split("|") for line in report.splitlines()))
-        state.update(status=("TEST OK" if email_test else "PARTIAL" if partial else "OK") if exit_code == 0 else "FAILED", finished=finished.isoformat(timespec="seconds"),
-                     exit_code=exit_code, summary=str(summary_file), email="pending")
-        try:
-            atomic_text(state_dir / "sources.json", json.dumps(sources(config), indent=2) + "\n")
-        except (OSError, subprocess.SubprocessError) as error:
-            state["inventory_error"] = str(error)
-        save_state(config, state)
-        try:
-            if mail_enabled:
-                send_email(config, summary_file, "[TMS] " + ("setup test" if email_test else state["status"]) + " — " + finished.strftime("%Y-%m-%d %H:%M"))
-                state["email"] = "submitted to Apple Mail"
-            else:
-                state["email"] = "disabled (TMS_EMAIL_ENABLED=0)"
-                print("Email: " + state["email"])
-        except Exception as error:
-            state["email"] = "FAILED: " + str(error)
-            print(state["email"], file=sys.stderr)
-        save_state(config, state)
-        return 1 if exit_code or state["email"].startswith("FAILED") else 0
+    signal.signal(signal.SIGTERM, interrupted)
+    signal.signal(signal.SIGINT, interrupted)
+    output, exit_code = deque(maxlen=4000), 1
+    try:
+        if email_test:
+            output = ["FINAL BACKUP REPORT\n", "Setup test only — no backup was started.\n"]
+            output += ["{source} | {last}\n".format(source=x["source"] or x["label"] + " (unknown)", last=x["last"]) for x in sources(config)]
+            log.write_text("".join(output))
+            exit_code = 0
+        else:
+            tms_args = ["--all"] if arguments == ["--all"] else [arguments[1]]
+            command = ["/bin/bash", "-c", 'source "$1"; _tms_service_run=yes; shift; tms "$@"', "tms", str(ROOT / "tms.sh")] + tms_args
+            with log.open("w") as stream:
+                child_env = environment(config)
+                child_env[FD_ENV] = str(lock_fd)
+                child = subprocess.Popen(command, env=child_env, pass_fds=(lock_fd,), stdout=subprocess.PIPE,
+                                         stderr=subprocess.STDOUT, text=True, errors="replace", start_new_session=True)
+                for line in child.stdout:
+                    stream.write(line)
+                    stream.flush()
+                    print(line, end="", flush=True)
+                    output.append(line)
+                exit_code = child.wait()
+    except Exception as error:
+        if child and child.poll() is None:
+            os.killpg(child.pid, signal.SIGTERM)
+            child.wait(timeout=20)
+        output.append("Runner error: " + str(error) + "\n")
+        with log.open("a") as stream:
+            stream.write(output[-1])
+    finished = dt.datetime.now().astimezone()
+    text = "".join(output)
+    index = text.rfind("FINAL BACKUP REPORT")
+    report = text[index:] if index >= 0 else "No final table was produced.\n" + text[-6000:]
+    try:
+        schedule = scheduler_description()
+    except Exception as error:
+        schedule = "Scheduler: status unavailable — " + str(error)
+    summary = ("TMS " + ("setup email test" if email_test else "backup report") + " — " + socket.gethostname() + "\n"
+               + "Origin: service\nStarted: " + started.isoformat(timespec="seconds") + "\n"
+               + "Finished: " + finished.isoformat(timespec="seconds") + "\n"
+               + "Destination: " + config["backup_volume"] + "\n"
+               + schedule + "\n"
+               + "Backup exit status: " + str(exit_code) + "\n\n" + report + "\nLog: " + str(log) + "\n")
+    summary_file = log.with_suffix(".summary.txt")
+    summary_file.write_text(summary)
+    atomic_text(state_dir / "last-summary.txt", summary)
+    partial = any(len(parts) > 1 and parts[1].strip() == "PARTIAL"
+                  for parts in (line.split("|") for line in report.splitlines()))
+    state.update(status=("TEST OK" if email_test else "PARTIAL" if partial else "OK") if exit_code == 0 else "FAILED", finished=finished.isoformat(timespec="seconds"),
+                 exit_code=exit_code, summary=str(summary_file), email="pending")
+    try:
+        atomic_text(state_dir / "sources.json", json.dumps(sources(config), indent=2) + "\n")
+    except (OSError, subprocess.SubprocessError) as error:
+        state["inventory_error"] = str(error)
+    save_state(config, state)
+    try:
+        if mail_enabled:
+            send_email(config, summary_file, "[TMS] " + ("setup test" if email_test else state["status"]) + " — " + finished.strftime("%Y-%m-%d %H:%M"))
+            state["email"] = "submitted to Apple Mail"
+        else:
+            state["email"] = "disabled (TMS_EMAIL_ENABLED=0)"
+            print("Email: " + state["email"])
+    except Exception as error:
+        state["email"] = "FAILED: " + str(error)
+        print(state["email"], file=sys.stderr)
+    save_state(config, state)
+    return 1 if exit_code or state["email"].startswith("FAILED") else 0
 
 
 def display(text):
@@ -425,14 +434,24 @@ def menu():
     path = config["state_dir"] / "status.json"
     state = json.loads(path.read_text()) if path.exists() else {}
     active = backup_active(config)
+    owner = {}
+    if active:
+        try:
+            owner = json.loads((config["state_dir"] / "engine-owner.json").read_text())
+        except (OSError, ValueError):
+            pass
+    managed_active = (active and state.get("status") == "RUNNING"
+                      and owner.get("kind", "service") == "service"
+                      and owner.get("pid", state.get("pid")) == state.get("pid"))
     email_failed = state.get("email", "").startswith("FAILED")
-    status = "RUNNING" if active else state.get("status", "Not run yet")
+    status = "RUNNING" if managed_active else "RUNNING (" + owner.get("kind", "engine") + ")" if active else state.get("status", "Not run yet")
     if status == "RUNNING" and not active:
         status = "INTERRUPTED"
     icon = "↻" if active else ("■" if status == "STOPPED" else "!" if email_failed or status in ("FAILED", "INTERRUPTED") else "⚠" if status == "PARTIAL" else "✓" if status == "OK" else "—")
     print("TMS " + icon)
     print("---")
-    print(display(status + " · " + state.get("finished", state.get("started", ""))))
+    timestamp = owner.get("started", "engine lock held") if active and not managed_active else state.get("finished", state.get("started", ""))
+    print(display(status + " · " + timestamp))
     print(display(scheduler_description()))
     print(display("Destination: " + config["backup_volume"]))
     if state.get("email"):
@@ -440,7 +459,7 @@ def menu():
     action = " | bash=/usr/bin/python3 param1=" + shlex.quote(str(ROOT / "tms-service.py")) + " param2=start param3="
     print("---")
     print("Back up all now" + action + "--all terminal=false refresh=true")
-    if active and state.get("status") == "RUNNING" and isinstance(state.get("pid"), int):
+    if managed_active and isinstance(state.get("pid"), int):
         print("Hard stop current backup | bash=/usr/bin/python3 param1=" + shlex.quote(str(ROOT / "tms-service.py"))
               + " param2=stop param3=" + str(state["pid"]) + " terminal=false refresh=true")
     else:
@@ -465,7 +484,7 @@ def menu():
         else:
             print("--Original source unknown; cannot back up")
     print("---")
-    if active and state.get("status") == "RUNNING" and state.get("log"):
+    if managed_active and state.get("log"):
         print("Open current backup log · started " + display(state.get("started", "unknown time"))
               + " | bash=/usr/bin/open param1=" + shlex.quote(state["log"]) + " terminal=false")
     completed = completed_report(config)
