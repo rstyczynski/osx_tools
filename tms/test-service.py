@@ -142,5 +142,52 @@ class ServiceTest(unittest.TestCase):
         self.assertIn("FAILED: test mail error", state["email"])
 
 
+    def test_retired_source_with_stale_menu_cache(self):
+        with patch.object(service, "send_email"):
+            self.assertEqual(self.invoke(["--source", str(self.source)]), 0)
+        label = Path(self.config["backup_volume"]) / "backup" / self.source.name
+        previous = (label / "latest").readlink()
+        (label / ".retired").write_text(json.dumps({"replacement": str(self.root)}))
+        self.assertTrue(service.sources(self.config)[0]["retired"])
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            service.menu()
+        self.assertIn("Retired; backup disabled", out.getvalue())
+        self.assertNotIn("--Back up now", out.getvalue())
+        with patch.object(service, "send_email"):
+            self.assertNotEqual(self.invoke(["--source", str(self.source)]), 0)
+            self.assertEqual(self.invoke(["--all"]), 0)
+        self.assertEqual((label / "latest").readlink(), previous)
+
+    def test_pending_parent_menu(self):
+        with patch.object(service, "send_email"):
+            self.assertEqual(self.invoke(["--source", str(self.source)]), 0)
+        label = Path(self.config["backup_volume"]) / "backup" / self.source.name
+        (label / ".consolidating").write_text(json.dumps({"source": str(self.source)}))
+        self.assertTrue(service.sources(self.config)[0]["pending"])
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            service.menu()
+        self.assertIn("Consolidation incomplete", out.getvalue())
+        self.assertNotIn("--Back up now", out.getvalue())
+
+    def test_partial_report_state_and_email(self):
+        report = ["FINAL BACKUP REPORT\n",
+                  "SOURCE | STATUS | CHANGED | EXCLUDED | TYPE | SECONDS | SNAPSHOT / NOTE\n",
+                  "/tmp/source | PARTIAL | 10 | 0 | full | 2 | done with warnings\n",
+                  "Total: 1 | OK: 0 | FAILED: 0 | SKIPPED: 0 | PARTIAL: 1\n",
+                  "TRANSFER DIAGNOSTICS: /tmp/source\n", "could not copy example.txt\n"]
+        with patch.object(service.subprocess, "Popen") as spawn, patch.object(service, "send_email") as email:
+            spawn.return_value.stdout = iter(report)
+            spawn.return_value.wait.return_value = 0
+            self.assertEqual(self.invoke(["--all"]), 0)
+        state = json.loads((self.config["state_dir"] / "status.json").read_text())
+        self.assertEqual(state["status"], "PARTIAL")
+        self.assertIn("PARTIAL", email.call_args.args[2])
+        body = service.email_body("".join(report))
+        self.assertIn("done with warnings", body)
+        self.assertIn("could not copy example.txt", body)
+
+
 if __name__ == "__main__":
     unittest.main()

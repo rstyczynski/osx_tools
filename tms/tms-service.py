@@ -59,6 +59,8 @@ def sources(config):
         source = proc.stdout.rstrip("\n") if proc.returncode == 0 else None
         latest = label / "latest"
         result.append({"label": label.name, "source": source,
+                       "retired": os.path.lexists(label / ".retired"),
+                       "pending": os.path.lexists(label / ".consolidating"),
                        "last": latest.resolve().name if latest.is_dir() else "never"})
     return result
 
@@ -76,7 +78,7 @@ def email_body(summary):
     end = header + 1
     while end < len(lines) and " | " in lines[end] and not lines[end].startswith("Total:"):
         columns = [part.strip() for part in lines[end].split(" | ")]
-        if len(columns) != len(headers) or columns[1] not in ("OK", "FAILED", "SKIPPED"):
+        if len(columns) != len(headers) or columns[1] not in ("OK", "PARTIAL", "FAILED", "SKIPPED"):
             return summary  # Never damage an unfamiliar report.
         rows.append(columns)
         end += 1
@@ -230,7 +232,9 @@ def run_backup(arguments):
         summary_file = log.with_suffix(".summary.txt")
         summary_file.write_text(summary)
         atomic_text(state_dir / "last-summary.txt", summary)
-        state.update(status=("TEST OK" if email_test else "OK") if exit_code == 0 else "FAILED", finished=finished.isoformat(timespec="seconds"),
+        partial = any(len(parts) > 1 and parts[1].strip() == "PARTIAL"
+                      for parts in (line.split("|") for line in report.splitlines()))
+        state.update(status=("TEST OK" if email_test else "PARTIAL" if partial else "OK") if exit_code == 0 else "FAILED", finished=finished.isoformat(timespec="seconds"),
                      exit_code=exit_code, summary=str(summary_file), email="pending")
         try:
             atomic_text(state_dir / "sources.json", json.dumps(sources(config), indent=2) + "\n")
@@ -271,7 +275,7 @@ def menu():
     status = "RUNNING" if active else state.get("status", "Not run yet")
     if status == "RUNNING" and not active:
         status = "INTERRUPTED"
-    icon = "↻" if active else ("!" if email_failed or status in ("FAILED", "INTERRUPTED") else "✓" if status == "OK" else "—")
+    icon = "↻" if active else ("!" if email_failed or status in ("FAILED", "INTERRUPTED") else "⚠" if status == "PARTIAL" else "✓" if status == "OK" else "—")
     print("TMS " + icon)
     print("---")
     print(display(status + " · " + state.get("finished", state.get("started", ""))))
@@ -291,7 +295,12 @@ def menu():
     for source in inventory:
         token = base64.urlsafe_b64encode(source["label"].encode()).decode()
         print(display(source["label"] + " · " + source["last"]))
-        if source["source"]:
+        label_path = Path(config["backup_volume"]) / "backup" / source["label"]
+        if os.path.lexists(label_path / ".consolidating"):
+            print("--Consolidation incomplete; resume with tms --consolidate PARENT")
+        elif os.path.lexists(label_path / ".retired"):
+            print("--Retired; backup disabled (history retained)")
+        elif source["source"]:
             print("--Back up now" + action + shlex.quote(token) + " terminal=false refresh=true")
             print("--" + display(source["source"]))
         else:

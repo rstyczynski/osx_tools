@@ -123,7 +123,7 @@ def raise_walk_error(error):
     raise error
 
 
-def prepare(source, snapshot, incremental=False, marker=None):
+def prepare(source, snapshot, incremental=False, marker=None, resume=False):
     source, snapshot = Path(source).resolve(), Path(snapshot).resolve()
     if snapshot == source or source in snapshot.parents:
         raise ValueError("Backup destination must be outside the source directory")
@@ -147,7 +147,7 @@ def prepare(source, snapshot, incremental=False, marker=None):
             manifest.add(path)
             manifest.update(parent for parent in path.parents if parent == source or source in parent.parents)
     removed = 0
-    if incremental and mirror.is_dir():
+    if (incremental or resume) and mirror.is_dir():
         # Only unlink entries in the NEW snapshot; old snapshots and source data remain intact.
         for directory, dirs, files in os.walk(mirror, topdown=False, followlinks=False,
                                              onerror=raise_walk_error):
@@ -291,6 +291,7 @@ def main():
     scan.add_argument("source")
     scan.add_argument("snapshot")
     scan.add_argument("--marker")
+    scan.add_argument("--resume", action="store_true")
     explain = commands.add_parser("explain")
     explain.add_argument("path")
     explain.add_argument("--source")
@@ -299,7 +300,7 @@ def main():
     size.add_argument("--json", action="store_true")
     args = parser.parse_args()
     if args.command == "prepare":
-        print(prepare(args.source, args.snapshot, bool(args.marker), args.marker))
+        print(prepare(args.source, args.snapshot, bool(args.marker), args.marker, args.resume))
     elif args.command == "estimate":
         result = estimate(args.source)
         if args.json:

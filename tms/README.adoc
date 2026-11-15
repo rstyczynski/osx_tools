@@ -1,6 +1,6 @@
 = TimeMachine Simplified (tms)
 
-Version 1.7.0. Bash functions for full and incremental directory backups.
+Version 1.8.0. Bash functions for full and incremental directory backups.
 
 == Setup
 
@@ -38,16 +38,91 @@ tms --explain ~/project/.models/weights.bin --source ~/project
 Every invocation displays the effective `backup_volume`.
 Each source has a visible divider and a header showing its path and destination.
 After completion, a final report has one row per source: source path, status
-(`OK`, `FAILED`, or `SKIPPED`), changed files, excluded files, backup type, elapsed seconds,
+(`OK`, `PARTIAL`, `FAILED`, or `SKIPPED`), changed files, excluded files, backup type, elapsed seconds,
 and snapshot name or failure/skip note. Batch runs print one combined report.
 Changed files means regular files actually transferred by rsync; a full backup
 counts all transferred regular files. A dash means the count is unavailable.
 On a failed transfer, any reported count is partial. Transfer statistics are
 retained beside the snapshot in `<timestamp>[.full].stats`.
+Rsync exits 23 (some entries could not transfer) and 24 (source entries vanished)
+are completed backups with warnings: status `PARTIAL`, command exit zero, and a
+published `latest` snapshot. A `<snapshot>.partial` sidecar records that outcome.
+Transfer diagnostics are saved in `<snapshot>.warnings` and printed after the
+final report, including in service/email summaries. Fatal transfer or output
+failures remain `FAILED` and do not publish a new `latest`.
 `--all` is explicit: merely running `tms` never starts a batch backup.
 `--all` takes no additional arguments and runs each source sequentially.
 Missing or unrecognizable sources are reported; the other sources still run.
-The command returns nonzero if any source fails or is skipped, or no sources are known.
+The command returns nonzero if any active source fails or cannot be identified,
+or no sources are known. Retired sources are intentional skips and do not cause failure.
+
+=== Retired sources
+
+Before creating a snapshot, TMS rejects a source that contains, or is contained
+by, another active registered source. It lists overlapping sources and leaves
+their state unchanged. Paths are resolved before comparison; retired sources
+do not block their replacement. There is currently no duplication override.
+
+Source state lives at the backup destination. A `.retired` marker means retired;
+`.consolidating` marks an incomplete parent attempt as pending. Absence of both
+means active. The JSON retirement marker
+records `replacement` (absolute source path), `retired_at` (ISO timestamp), and
+`replacement_snapshot` (successful parent snapshot label). Existing `.source`,
+`latest`, and snapshots remain intact and can still be restored.
+
+Direct `tms SOURCE` and `tms SOURCE full` calls reject retired sources before
+creating a snapshot, explain the replacement, and return nonzero. `--all`,
+scheduled runs, and `tms_batch` skip them with a `SKIPPED` report row. The menu
+disables their backup action. Inventory shows `RETIRED` without scanning the source.
+Even an invalid or unreadable marker blocks backup; inspect and repair its metadata.
+To reactivate deliberately, review overlap with the replacement, then remove only
+the label's `.retired` marker. No snapshots need to be deleted.
+
+=== Consolidate under a parent
+
+[source,bash]
+----
+tms --consolidate ~/Documents --dry-run  # Preview children and check exclusion coverage
+tms --consolidate ~/Documents           # Create or resume parent snapshot, then retire covered children
+----
+
+The preview reads current source trees but creates no snapshots or markers.
+Execution checks inclusion under both the child and parent rule contexts,
+creates or resumes a parent snapshot, then checks inclusion again and verifies the
+currently included child entries exist in that snapshot. Only then does it
+write each child's `.retired` marker. Old child snapshots, including retained
+source-deleted content, stay in their original labels; they are not merged into
+the new parent snapshot. The usual TMS metadata/consistency limitations still apply;
+this check verifies coverage, not file content hashes or a point-in-time filesystem image.
+The first attempt uses a full snapshot if no parent baseline exists; an existing
+parent baseline is extended incrementally. The pending marker records the chosen
+snapshot name. Retrying the same command resumes that snapshot instead of creating
+another full copy: it refreshes the manifest, applies current exclusions, and lets
+rsync reuse unchanged destination files. A resume is reported with type `resume`.
+Older source-only pending markers select the matching unfinished attempt with the
+largest recorded transferred byte count. Preview prints the selected path before
+any writes. A deleted parent attempt cannot supply data for a resume.
+
+An exclusion gap reports the affected path and rule; adjust rules and preview
+again. Fatal backup or verification failure leaves children active. A partial
+transfer is done with warnings; children retire only when their currently included
+entries exist in the parent. If partial copying leaves a child coverage gap,
+the snapshot remains available, a warning explains the gap, and children stay active.
+A local
+`backup/<parent-label>/.consolidating` marker keeps the attempted parent pending,
+so it cannot block continued child backups; automatic runs skip it and inventory
+shows `PENDING`. Resume it with the same consolidation command. The marker is
+removed only after parent coverage verification. If retirement marker writing
+is interrupted after verification, some children may already be retired; each
+marker records its completed retirement. Rerun consolidation for the remaining
+active children. A failed or interrupted parent attempt may leave an unpublished
+snapshot directory; it is never promoted merely to finish consolidation.
+
+Execution holds the scheduler's existing run lock. Wait for independent manual
+backups to finish before starting consolidation. A source already covered by an
+active ancestor must keep using that ancestor; consolidation only replaces
+descendants. An unknown active label or missing child blocks consolidation
+until its source metadata or availability is resolved.
 
 === Source inventory
 
@@ -58,7 +133,9 @@ snapshots without `.source` metadata.
 
 States are `READY`, `MISSING`, `UNKNOWN` (original path cannot be recovered),
 `NO-BACKUP` (source exists but there is no successful `latest` snapshot), and
-`UNREADABLE` (size or file enumeration failed). Unavailable fields show `-`.
+`UNREADABLE` (size or file enumeration failed), plus `RETIRED` (backup disabled,
+history retained), `PARTIAL` (latest snapshot completed with warnings), and
+`PENDING` (parent consolidation incomplete). Unavailable fields show `-`.
 Size is allocated source disk usage from `du`, expressed in KiB/MiB/GiB;
 file counts include regular files. Scans do not follow symbolic links and may
 take time on large directory trees. The inventory command succeeds even when
@@ -116,9 +193,11 @@ bundled `excludes.default` with the same defaults:
 hf-cache/
 supertonic-cache/
 *venv/
+.codex-cli-broker.sock.*
 ----
 
-Only directories matching these names/patterns and their descendants are excluded.
+Directory patterns exclude matching directories and their descendants.
+The `.codex-cli-broker.sock.*` pattern excludes temporary broker socket names at any depth.
 `*venv/` matches directories ending in `venv`, including `.venv`, `mlx-venv`,
 and `tts-venv`, at any depth. It does not exclude a same-named ordinary file.
 Use a local include such as `!/tools/custom-venv/` if that environment must be kept.
@@ -270,7 +349,7 @@ into that directory, retaining its stored absolute-path tree.
 
 The following metadata behavior and correctness bugs were checked on macOS with
 GNU rsync 3.4.1 on 2026-11-12 using temporary full-backup, restore, and incremental
-cycles. The two correctness bugs remain in version 1.7.0. Version 1.6.0 adds
+cycles. The two correctness bugs remain in version 1.8.0. Version 1.6.0 adds
 policy filtering and captures new included empty directories; it does not repair
 historical metadata or the rsync content quick-check bug.
 
@@ -346,7 +425,7 @@ from the current working directory. Use `tms --all` for destination-based discov
 
 == Verification
 
-Run `bash test-tms.sh` from this directory. Tests create temporary fixtures and
+Run `bash test-tms.sh` and `python3 -B test-sources.py` from this directory. Tests create temporary fixtures and
 never operate on your configured backup destination.
 
 
@@ -484,7 +563,7 @@ For an explicit setup email without running backups:
 
 === Menu and logs
 
-SwiftBar refreshes every minute. It shows running/success/failure state, last-run
+SwiftBar refreshes every minute. It shows running/success/partial/failure state, last-run
 time, actual scheduler status, mail status, destination, and last-backup timestamps.
 Use *Back up all now* or a source's *Back up now* submenu. Other actions open the
 saved summary and logs. Source paths and timestamps are cached after each wrapper

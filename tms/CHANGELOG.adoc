@@ -1,6 +1,17 @@
 = Changelog
 
-== Unreleased
+== 1.8.0 — 2026-11-15
+
+* Treat rsync exits 23/24 as completed `PARTIAL` snapshots, retain `latest`, and collect transfer warnings at the end of terminal/email reports. Preserve fatal-error handling.
+* Resume the recorded pending consolidation snapshot on retry, refresh manifests/exclusions, and reuse unchanged files. Extend existing parent baselines incrementally. Migrate older source-only pending records by selecting the attempt with the largest recorded transfer.
+
+* Exclude temporary `.codex-cli-broker.sock.*` entries at any depth by default.
+
+* Add actionable overlap guidance and `tms --consolidate PARENT [--dry-run]`: preview coverage, create or resume the parent snapshot, verify child inclusion, and retire descendants locally while retaining their histories. Share the scheduler lock and leave children active on fatal backup or coverage verification failure.
+
+* Reject parent/child overlaps with active registered sources before snapshot creation; compare canonical directory boundaries and list conflicts.
+
+* Honor destination-local `.retired` metadata: reject explicit backups, skip retired sources in automatic/config batches, expose inventory/menu state, and preserve restore access to history. Invalid markers fail closed.
 
 * Add `TMS_EMAIL_ENABLED=0` to disable report delivery and all Apple Mail interaction, including setup email tests. Backups and local reports continue, with disabled email shown in logs and SwiftBar. Unset retains enabled behavior.
 
