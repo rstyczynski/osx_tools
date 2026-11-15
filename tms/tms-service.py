@@ -53,15 +53,25 @@ def sources(config):
     for label in sorted(root.iterdir()):
         if not label.is_dir() or label.is_symlink():
             continue
-        proc = subprocess.run(
-            ["/bin/bash", "-c", 'source "$1"; _tms_source_for_label "$2"', "tms", str(ROOT / "tms.sh"), str(label)],
-            env=environment(config), capture_output=True, text=True, timeout=20)
-        source = proc.stdout.rstrip("\n") if proc.returncode == 0 else None
+        metadata = label / ".source"
+        if metadata.is_file():
+            # Modern labels need only a small destination-side metadata read.
+            with metadata.open() as stream:
+                value = stream.readline().rstrip("\n")
+            source = value if os.path.isabs(value) and Path(value).name == label.name else None
+        else:
+            # Keep legacy discovery, which also reads only backup metadata/trees.
+            proc = subprocess.run(
+                ["/bin/bash", "-c", 'source "$1"; _tms_source_for_label "$2"', "tms", str(ROOT / "tms.sh"), str(label)],
+                env=environment(config), capture_output=True, text=True, timeout=20)
+            source = proc.stdout.rstrip("\n") if proc.returncode == 0 else None
         latest = label / "latest"
+        last = latest.resolve().name if latest.is_dir() else "never"
         result.append({"label": label.name, "source": source,
                        "retired": os.path.lexists(label / ".retired"),
                        "pending": os.path.lexists(label / ".consolidating"),
-                       "last": latest.resolve().name if latest.is_dir() else "never"})
+                       "partial": (label / (last + ".partial")).is_file(),
+                       "last": last})
     return result
 
 
@@ -287,14 +297,14 @@ def menu():
     print("---")
     print("Back up all now" + action + "--all terminal=false refresh=true")
     try:
-        cache = config["state_dir"] / "sources.json"
-        inventory = json.loads(cache.read_text()) if cache.exists() else sources(config)
+        inventory = sources(config)
     except (OSError, subprocess.SubprocessError) as error:
         inventory = []
         print(display("Sources unavailable: " + str(error)))
-    for source in inventory:
+    for source in sorted(inventory, key=lambda item: (item.get("retired", False), item["label"].casefold())):
         token = base64.urlsafe_b64encode(source["label"].encode()).decode()
-        print(display(source["label"] + " · " + source["last"]))
+        badge = " · RETIRED" if source.get("retired") else " · PENDING" if source.get("pending") else " · PARTIAL" if source.get("partial") else ""
+        print(display(source["label"] + badge + " · " + source["last"]))
         label_path = Path(config["backup_volume"]) / "backup" / source["label"]
         if os.path.lexists(label_path / ".consolidating"):
             print("--Consolidation incomplete; resume with tms --consolidate PARENT")
@@ -319,8 +329,11 @@ def start(token):
         label = base64.urlsafe_b64decode(token.encode()).decode()
         config = configuration()
         cache = config["state_dir"] / "sources.json"
-        inventory = json.loads(cache.read_text()) if cache.exists() else sources(config)
+        inventory = json.loads(cache.read_text()) if cache.exists() else []
         matches = [x for x in inventory if x["label"] == label and x["source"]]
+        if not matches:
+            # Manual backups can register a source before the next service cache update.
+            matches = [x for x in sources(config) if x["label"] == label and x["source"]]
         if not matches:
             raise ValueError("Unknown source label")
         arguments = ["--source", matches[0]["source"]]

@@ -1,5 +1,10 @@
 = Changelog
 
+== 1.8.2 — 2026-11-15
+
+* Refresh SwiftBar source inventory directly from destination metadata on every menu refresh, so manually registered parents and current snapshot timestamps appear immediately. Show active sources first and mark retired, pending, and partial entries.
+* Resolve newly registered menu actions even when the service source cache predates them. Read modern `.source` metadata directly without scanning source trees.
+
 == 1.8.1 — 2026-11-15
 
 * Complete parent consolidation after partial transfers, keeping coverage gaps as warnings and old child histories available. Future normal backups retry missing or changed entries incrementally.

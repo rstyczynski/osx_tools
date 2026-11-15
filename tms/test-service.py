@@ -188,6 +188,39 @@ class ServiceTest(unittest.TestCase):
         self.assertIn("done with warnings", body)
         self.assertIn("could not copy example.txt", body)
 
+    def test_menu_refresh_discovers_parent_and_click_ignores_stale_cache(self):
+        backup = Path(self.config["backup_volume"]) / "backup"
+        child = backup / self.source.name
+        child.mkdir(parents=True)
+        (child / ".source").write_text(str(self.source) + "\n")
+        (child / ".retired").write_text(json.dumps({"replacement": str(self.root / "Documents")}))
+        state = self.config["state_dir"]
+        state.mkdir()
+        (state / "sources.json").write_text(json.dumps([
+            {"label": self.source.name, "source": str(self.source), "last": "old"},
+            {"label": "removed-source", "source": "/tmp/removed-source", "last": "old"}]))
+        parent = backup / "Documents"
+        snapshot = parent / "2026-11-15T195448"
+        snapshot.mkdir(parents=True)
+        # The source path need not be accessed, or even exist, to refresh the menu.
+        source = self.root / "Documents"
+        (parent / ".source").write_text(str(source) + "\n")
+        (parent / "latest").symlink_to(snapshot)
+        Path(str(snapshot) + ".partial").touch()
+        out = io.StringIO()
+        with patch.object(service, "scheduler_description", return_value="Scheduler: enabled"):
+            with patch.object(service.subprocess, "run", side_effect=AssertionError("modern inventory must not spawn source scans")):
+                with contextlib.redirect_stdout(out):
+                    service.menu()
+                with patch.object(service.subprocess, "Popen") as spawn:
+                    service.start(base64.urlsafe_b64encode(b"Documents").decode())
+        menu = out.getvalue()
+        self.assertIn("Documents · PARTIAL · 2026-11-15T195448", menu)
+        self.assertIn(self.source.name + " · RETIRED", menu)
+        self.assertLess(menu.index("Documents · PARTIAL"), menu.index(self.source.name + " · RETIRED"))
+        self.assertNotIn("removed-source", menu)
+        self.assertEqual(spawn.call_args[0][0][-2:], ["--source", str(source)])
+
 
 if __name__ == "__main__":
     unittest.main()
