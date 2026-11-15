@@ -72,6 +72,21 @@ or replace `run.lock`: its existence does not mean it is held. `engine-owner.jso
 is display metadata, while the kernel lock is authoritative. Read-only help,
 inventory, estimates, explanations, and consolidation previews remain available.
 
+After updating, reload the functions in every existing terminal used for TMS:
+
+[source,bash]
+----
+source ~/projects/osx_tools/tms/tms.sh
+tms --version
+----
+
+For this release the version must be `TimeMachine Simplified 1.8.5`.
+Updating files on disk leaves older function definitions in an already-open
+shell unchanged. For example, a shell still reporting 1.7.0 has no engine lock,
+even when scheduled/menu runs use the installed 1.8.5 files. Verify the loaded
+version before starting another backup. New shells load the version referenced
+by their startup configuration.
+
 === Retired sources
 
 Before creating a snapshot, TMS rejects a source that contains, or is contained
@@ -605,9 +620,16 @@ This control covers scheduler/menu/wrapper jobs; independent terminal backups
 are outside that tracked process tree. Stopping a run leaves the scheduler enabled.
 
 The service still caches paths after runs for click handling; a new label missing
-from that cache is resolved from current backup metadata. While the engine mutex is held, the menu identifies its active owner as terminal,
-service, or consolidation; an old service state is not shown as a new terminal run. Direct terminal backups save
-their final report too and update the completed-report link, including warnings,
+from that cache is resolved from current backup metadata. While the engine mutex
+is held, the menu identifies its active owner as terminal, service, or consolidation;
+an old service state is not shown as a new terminal run.
+`RUNNING (terminal)` identifies the same job started in your terminal. SwiftBar
+is observing that engine job; opening or refreshing the menu does not start
+another backup. A backup requested through the menu while it runs is blocked
+by the shared engine mutex. The hard-stop action remains limited to tracked
+service jobs, so it is disabled for a terminal-owned run.
+
+Direct terminal backups save their final report too and update the completed-report link, including warnings,
 without changing a running service job's status. Reload `tms.sh` in existing
 terminals after updating to enable report persistence. Reports from terminal
 runs completed before this feature cannot be recovered as original terminal logs.

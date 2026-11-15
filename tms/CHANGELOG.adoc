@@ -2,6 +2,8 @@
 
 == 1.8.5 — 2026-11-15
 
+* Document the required reload/version check for existing shells after updates; an already-loaded 1.7.0 function does not gain the new lock from changed files alone. Clarify that SwiftBar `RUNNING (terminal)` observes the same terminal job, with competing writes blocked and service-only hard stop disabled.
+
 * Enforce one engine-owned kernel mutex for every backup entry point: plain/full terminal calls, all-source runs, configuration batches, consolidation/resume, scheduler, and SwiftBar. Reject concurrent CLI writes with exit 75 before snapshot mutations.
 * Reuse only a verified inherited descriptor for the actual mutex; service flags cannot bypass locking. Workers retain the lock even if their coordinator dies. Keep read-only commands available.
 * Show the active engine owner in SwiftBar so a terminal backup is not confused with a previous service run. Add real CLI/service concurrency, spoofed-descriptor, nested-call, and coordinator-death checks.
