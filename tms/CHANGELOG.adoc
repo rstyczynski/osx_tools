@@ -1,5 +1,10 @@
 = Changelog
 
+== 1.8.4 — 2026-11-15
+
+* Add SwiftBar hard-stop control for the current service backup: validate runner identity and menu PID, freeze the coordinator, SIGKILL its process groups/descendants, release the run lock, and record STOPPED with a timestamped report. Preserve working and historical snapshots.
+* Reject stale menu requests and reused runner PIDs; resume a frozen coordinator if validation fails before stopping. Add unit checks and a real isolated process-group integration test.
+
 == 1.8.3 — 2026-11-15
 
 * Save terminal backup summaries, including partial results and diagnostics, alongside service reports. Do not overwrite the state of a running service job or send terminal report emails.

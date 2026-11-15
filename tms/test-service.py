@@ -7,6 +7,7 @@ import importlib.util
 import io
 import json
 import os
+import signal
 from pathlib import Path
 import tempfile
 import time
@@ -177,7 +178,7 @@ class ServiceTest(unittest.TestCase):
                   "/tmp/source | PARTIAL | 10 | 0 | full | 2 | done with warnings\n",
                   "Total: 1 | OK: 0 | FAILED: 0 | SKIPPED: 0 | PARTIAL: 1\n",
                   "TRANSFER DIAGNOSTICS: /tmp/source\n", "could not copy example.txt\n"]
-        with patch.object(service.subprocess, "Popen") as spawn, patch.object(service, "send_email") as email:
+        with patch.object(service.subprocess, "Popen") as spawn, patch.object(service, "send_email") as email, patch.object(service, "process_table", return_value={}):
             spawn.return_value.stdout = iter(report)
             spawn.return_value.wait.return_value = 0
             self.assertEqual(self.invoke(["--all"]), 0)
@@ -231,7 +232,7 @@ class ServiceTest(unittest.TestCase):
         text = "TMS backup report\nFinished: 2026-11-15T16:01:14+01:00\nLog: " + str(logs / "older.log") + "\n"
         older.write_text(text)
         (state / "last-summary.txt").write_text(text)
-        service.save_state(self.config, {"status": "RUNNING", "started": "2026-11-15T20:00:22+01:00", "log": str(log)})
+        service.save_state(self.config, {"status": "RUNNING", "pid": 424242, "started": "2026-11-15T20:00:22+01:00", "log": str(log)})
         previous = (state / "status.json").read_bytes()
         with (state / "run.lock").open("a+") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -239,6 +240,8 @@ class ServiceTest(unittest.TestCase):
             with contextlib.redirect_stdout(out):
                 service.menu()
             self.assertIn("Open current backup log · started 2026-11-15T20:00:22", out.getvalue())
+            self.assertIn("Hard stop current backup", out.getvalue())
+            self.assertIn("param2=stop param3=424242", out.getvalue())
             self.assertIn("Last completed report · service · 2026-11-15T16:01:14", out.getvalue())
             self.assertIn(str(older), out.getvalue())
             # Terminal completion must not replace an active service's run state.
@@ -254,6 +257,62 @@ class ServiceTest(unittest.TestCase):
                 service.menu()
             self.assertIn("Last completed report · terminal", out.getvalue())
             self.assertIn("Open current backup log", out.getvalue())
+
+    def stop_fixture(self):
+        state, logs = self.config["state_dir"], self.config["log_dir"]
+        state.mkdir()
+        logs.mkdir()
+        log = logs / "active.log"
+        log.write_text("Creating hard links...\n")
+        service.save_state(self.config, {"status": "RUNNING", "pid": 424242,
+                           "runner_birth": "Sun Nov 15 20:00:12 2026",
+                           "started": "2026-11-15T20:00:22+01:00", "log": str(log)})
+        return {
+            424242: {"parent": 1, "group": 424242, "birth": "Sun Nov 15 20:00:12 2026", "command": str(service.ROOT / "tms-service.py") + " run --all"},
+            424243: {"parent": 424242, "group": 424243, "birth": "same", "command": "bash tms.sh --all"},
+            424244: {"parent": 424243, "group": 424243, "birth": "same", "command": "gcp -al latest snapshot"},
+            999999: {"parent": 1, "group": 999999, "birth": "same", "command": "unrelated process"}}
+
+    def test_hard_stop_targets_backup_tree_and_keeps_snapshots(self):
+        table = self.stop_fixture()
+        snapshot = self.root / "working-snapshot"
+        snapshot.mkdir()
+        (snapshot / "file").write_text("preserve me")
+        with patch.object(service, "backup_active", return_value=True), patch.object(service, "process_table", return_value=table):
+            with patch.object(service.os, "kill") as kill, patch.object(service.os, "killpg") as killpg, patch.object(service.os, "getpgrp", return_value=999999):
+                self.assertEqual(service.hard_stop(424242), 0)
+        killpg.assert_called_once_with(424243, signal.SIGKILL)
+        self.assertEqual(kill.call_args_list, [unittest.mock.call(424242, signal.SIGSTOP), unittest.mock.call(424242, signal.SIGKILL)])
+        state = json.loads((self.config["state_dir"] / "status.json").read_text())
+        self.assertEqual(state["status"], "STOPPED")
+        self.assertEqual((snapshot / "file").read_text(), "preserve me")
+        report, title = service.completed_report(self.config)
+        self.assertIn("hard stop", title)
+        self.assertIn("STOPPED", report.read_text())
+
+    def test_hard_stop_rejects_stale_menu_and_reused_pid(self):
+        table = self.stop_fixture()
+        with patch.object(service, "backup_active", return_value=True), patch.object(service, "process_table", return_value=table), patch.object(service.os, "kill") as kill:
+            with self.assertRaisesRegex(ValueError, "selected backup has changed"):
+                service.hard_stop(111111)
+            table[424242]["birth"] = "different process start"
+            with self.assertRaisesRegex(ValueError, "PID was reused"):
+                service.hard_stop(424242)
+            table[424242]["birth"] = "Sun Nov 15 20:00:12 2026"
+            table[424242]["command"] = "unrelated application"
+            with self.assertRaisesRegex(ValueError, "not the TMS backup runner"):
+                service.hard_stop(424242)
+            kill.assert_not_called()
+
+    def test_hard_stop_unfreezes_runner_if_validation_changes(self):
+        table = self.stop_fixture()
+        changed = {**table, 424242: {**table[424242], "birth": "changed"}}
+        with patch.object(service, "backup_active", return_value=True), patch.object(service, "process_table", side_effect=[table, changed]):
+            with patch.object(service.os, "kill") as kill, patch.object(service.os, "killpg") as killpg:
+                with self.assertRaisesRegex(ValueError, "identity changed"):
+                    service.hard_stop(424242)
+        self.assertEqual(kill.call_args_list, [unittest.mock.call(424242, signal.SIGSTOP), unittest.mock.call(424242, signal.SIGCONT)])
+        killpg.assert_not_called()
 
 
 if __name__ == "__main__":

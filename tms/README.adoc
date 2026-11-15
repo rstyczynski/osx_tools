@@ -1,6 +1,6 @@
 = TimeMachine Simplified (tms)
 
-Version 1.8.3. Bash functions for full and incremental directory backups.
+Version 1.8.4. Bash functions for full and incremental directory backups.
 
 == Setup
 
@@ -355,7 +355,7 @@ into that directory, retaining its stored absolute-path tree.
 
 The following metadata behavior and correctness bugs were checked on macOS with
 GNU rsync 3.4.1 on 2026-11-12 using temporary full-backup, restore, and incremental
-cycles. The two correctness bugs remain in version 1.8.3. Version 1.6.0 adds
+cycles. The two correctness bugs remain in version 1.8.4. Version 1.6.0 adds
 policy filtering and captures new included empty directories; it does not repair
 historical metadata or the rsync content quick-check bug.
 
@@ -580,6 +580,14 @@ metadata and latest snapshot pointers, so sources added manually appear without
 waiting for a scheduled backup to finish. Active sources appear first; retired,
 pending, and partial entries have explicit labels. Modern labels do not require
 scanning source trees. Legacy labels can recover their source from backup trees.
+*Hard stop current backup* terminates the tracked service runner and its backup
+process tree with SIGKILL. It records `STOPPED`, releases the run lock, and saves
+a stop report. Working snapshots and previous completed snapshots are retained.
+The action targets the PID shown when the menu opened and refuses a stale action
+if another run has replaced it. It is disabled when no service backup is active.
+This control covers scheduler/menu/wrapper jobs; independent terminal backups
+are outside that tracked process tree. Stopping a run leaves the scheduler enabled.
+
 The service still caches paths after runs for click handling; a new label missing
 from that cache is resolved from current backup metadata. Overall run status describes service-managed runs. Direct terminal backups save
 their final report too and update the completed-report link, including warnings,
@@ -597,6 +605,11 @@ To stop automatic operation, run `tms --scheduler off` and `tms --swiftbar off`.
 The helper, access grant, snapshots, settings, and logs remain for reuse.
 
 === Service tests
+
+`python3 -B test-hard-stop.py` runs an isolated process-group integration test:
+it stops only a temporary backup fixture, checks an unrelated fixture survives,
+and verifies lock release and retained working snapshot data. It needs permission
+to inspect and signal its own test processes.
 
 `python3 -B test-manage.py` tests independent on/off/status transitions and
 background-check cleanup with mocked macOS commands. `python3 -B test-service.py`

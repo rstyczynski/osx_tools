@@ -37,6 +37,116 @@ def save_state(config, state):
     atomic_text(config["state_dir"] / "status.json", json.dumps(state, indent=2) + "\n")
 
 
+def backup_active(config):
+    path = config["state_dir"] / "run.lock"
+    if not path.exists():
+        return False
+    with path.open("r") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return True
+    return False
+
+
+def process_table(pid=None):
+    args = ["/bin/ps", "-axo", "pid=,ppid=,pgid=,lstart=,command="]
+    if pid is not None:
+        args = ["/bin/ps", "-p", str(pid), "-o", "pid=,ppid=,pgid=,lstart=,command="]
+    result = subprocess.run(args, capture_output=True, text=True, timeout=10, check=True,
+                            env=dict(os.environ, LC_ALL="C"))
+    table = {}
+    for line in result.stdout.splitlines():
+        parts = line.split(None, 8)
+        if len(parts) == 9:
+            number, parent, group = map(int, parts[:3])
+            table[number] = {"parent": parent, "group": group,
+                             "birth": " ".join(parts[3:8]), "command": parts[8]}
+    return table
+
+
+def stopped_report(config, state):
+    state = dict(state, status="STOPPED", stop_reason="Hard-stopped by operator (SIGKILL)")
+    state.setdefault("finished", dt.datetime.now().astimezone().isoformat(timespec="seconds"))
+    log = Path(state["log"])
+    with log.open("a") as stream:
+        stream.write("\n" + state["finished"] + " — " + state["stop_reason"] + "\n")
+    summary_file = log.with_suffix(".stopped.summary.txt")
+    summary = ("TMS backup STOPPED\nOrigin: service (hard stop)\n"
+               + "Started: " + state.get("started", "unknown") + "\nFinished: " + state["finished"] + "\n"
+               + "Destination: " + config["backup_volume"] + "\n\n"
+               + "The backup process tree was hard-stopped. Working snapshots were not deleted.\n"
+               + "Log: " + str(log) + "\nReport: " + str(summary_file) + "\n")
+    atomic_text(summary_file, summary)
+    atomic_text(config["state_dir"] / "last-summary.txt", summary)
+    state["summary"] = str(summary_file)
+    save_state(config, state)
+
+
+def hard_stop(expected_pid=None):
+    config = configuration()
+    path = config["state_dir"] / "status.json"
+    state = json.loads(path.read_text()) if path.exists() else {}
+    if state.get("status") != "RUNNING" or not backup_active(config):
+        print("No active service backup to hard-stop.")
+        return 0
+    pid = state.get("pid")
+    if not isinstance(pid, int) or pid <= 1 or pid == os.getpid():
+        raise ValueError("Invalid backup runner PID; nothing stopped")
+    if expected_pid is not None and expected_pid != pid:
+        raise ValueError("The selected backup has changed; refresh the menu before stopping it")
+    table = process_table()
+    runner = table.get(pid)
+    if not runner or str(ROOT / "tms-service.py") + " run" not in runner["command"]:
+        raise ValueError("Recorded PID is not the TMS backup runner; nothing stopped")
+    if state.get("runner_birth") and runner["birth"] != state["runner_birth"]:
+        raise ValueError("Runner PID was reused; nothing stopped")
+    frozen = False
+    killed = False
+    try:
+        # Freeze the coordinator before discovering/killing its copy process tree.
+        os.kill(pid, signal.SIGSTOP)
+        frozen = True
+        table = process_table()
+        if table.get(pid) != runner:
+            raise ValueError("Runner identity changed; nothing stopped")
+        current = json.loads(path.read_text())
+        if (current.get("pid"), current.get("started")) != (pid, state.get("started")):
+            raise ValueError("Current backup changed; nothing stopped")
+        descendants = set()
+        parents = {pid}
+        while parents:
+            children = {number for number, info in table.items() if info["parent"] in parents}
+            children -= descendants
+            descendants.update(children)
+            parents = children
+        # Session leaders belong to this runner; never signal the caller's group.
+        groups = {number for number in descendants if table[number]["group"] == number and number != os.getpgrp()}
+        for group in groups:
+            try:
+                os.killpg(group, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        for number in descendants:
+            if table[number]["group"] in groups:
+                continue
+            try:
+                os.kill(number, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        os.kill(pid, signal.SIGKILL)
+        killed = True
+    finally:
+        if frozen and not killed:
+            try:
+                os.kill(pid, signal.SIGCONT)
+            except ProcessLookupError:
+                pass
+    stopped_report(config, state)
+    print("Hard-stopped backup runner %s and %s descendant processes. Snapshot data retained." % (pid, len(descendants)))
+    return 0
+
+
 def record_terminal(config, report):
     """Persist a completed terminal report without changing an active service run."""
     finished = dt.datetime.now().astimezone()
@@ -226,6 +336,10 @@ def run_backup(arguments):
         log = log_dir / (started.strftime("%Y-%m-%dT%H%M%S") + "-" + str(os.getpid()) + ".log")
         state = {"status": "RUNNING", "pid": os.getpid(), "started": started.isoformat(timespec="seconds"),
                  "scope": arguments[-1], "log": str(log)}
+        try:
+            state["runner_birth"] = process_table(os.getpid())[os.getpid()]["birth"]
+        except (OSError, subprocess.SubprocessError, KeyError):
+            pass
         save_state(config, state)
         child = None
 
@@ -310,19 +424,12 @@ def menu():
     config = configuration()
     path = config["state_dir"] / "status.json"
     state = json.loads(path.read_text()) if path.exists() else {}
-    active = False
-    lock_path = config["state_dir"] / "run.lock"
-    if lock_path.exists():
-        with lock_path.open("r") as lock:
-            try:
-                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except BlockingIOError:
-                active = True
+    active = backup_active(config)
     email_failed = state.get("email", "").startswith("FAILED")
     status = "RUNNING" if active else state.get("status", "Not run yet")
     if status == "RUNNING" and not active:
         status = "INTERRUPTED"
-    icon = "↻" if active else ("!" if email_failed or status in ("FAILED", "INTERRUPTED") else "⚠" if status == "PARTIAL" else "✓" if status == "OK" else "—")
+    icon = "↻" if active else ("■" if status == "STOPPED" else "!" if email_failed or status in ("FAILED", "INTERRUPTED") else "⚠" if status == "PARTIAL" else "✓" if status == "OK" else "—")
     print("TMS " + icon)
     print("---")
     print(display(status + " · " + state.get("finished", state.get("started", ""))))
@@ -333,6 +440,11 @@ def menu():
     action = " | bash=/usr/bin/python3 param1=" + shlex.quote(str(ROOT / "tms-service.py")) + " param2=start param3="
     print("---")
     print("Back up all now" + action + "--all terminal=false refresh=true")
+    if active and state.get("status") == "RUNNING" and isinstance(state.get("pid"), int):
+        print("Hard stop current backup | bash=/usr/bin/python3 param1=" + shlex.quote(str(ROOT / "tms-service.py"))
+              + " param2=stop param3=" + str(state["pid"]) + " terminal=false refresh=true")
+    else:
+        print("Hard stop current backup (no active service backup)")
     try:
         inventory = sources(config)
     except (OSError, subprocess.SubprocessError) as error:
@@ -394,12 +506,14 @@ if __name__ == "__main__":
             sys.exit(run_backup(sys.argv[2:]))
         elif mode == "record-terminal":
             record_terminal(configuration(), sys.stdin.read())
+        elif mode == "stop" and len(sys.argv) in (2, 3):
+            sys.exit(hard_stop(int(sys.argv[2]) if len(sys.argv) == 3 else None))
         elif mode == "menu":
             menu()
         elif mode == "start" and len(sys.argv) == 3:
             start(sys.argv[2])
         else:
-            raise ValueError("Expected run, menu, or start LABEL")
+            raise ValueError("Expected run, menu, start LABEL, stop [PID], or record-terminal")
     except Exception as error:
         print("TMS error: " + str(error), file=sys.stderr)
         sys.exit(1)
