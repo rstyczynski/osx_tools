@@ -160,8 +160,9 @@ class ConsolidationTest(unittest.TestCase):
         self.central.write_text("exclude-later.tmp\n")
         (self.child / "new.txt").write_text("created after interruption")
         self.env["PATH"] = self.env["PATH"].split(":", 1)[1]
-        result = self.consolidate()
+        result = self.tms(str(self.parent))
         self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("Resuming pending consolidation", result.stdout)
         self.assertIn("Resuming existing snapshot", result.stdout)
         self.assertNotIn("Copying full backup", result.stdout)
         self.assertEqual((label / "latest").resolve(), snapshot)
@@ -185,7 +186,7 @@ class ConsolidationTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn("Resume existing snapshot: " + str(label / "2026-01-01T120000.full"), result.stdout)
 
-    def test_partial_copy_is_done_without_retiring_uncovered_child(self):
+    def test_partial_copy_is_done_and_next_backup_is_incremental(self):
         commands = self.base / "commands"
         commands.mkdir()
         wrapper = commands / "rsync"
@@ -197,10 +198,56 @@ class ConsolidationTest(unittest.TestCase):
         self.assertIn("PARTIAL", result.stdout)
         self.assertIn("WARNING: backup done", result.stdout)
         self.assertIn("could not copy keep.txt", result.stdout)
-        self.assert_active_history()
+        self.assertEqual((self.child_label / "latest").resolve(), self.original_snapshot)
+        self.assertTrue(self.original_snapshot.is_dir())
         label = self.volume / "backup" / self.parent.name
-        self.assertTrue((label / ".consolidating").is_file())
+        self.assertFalse((label / ".consolidating").exists())
+        retirement = json.loads((self.child_label / ".retired").read_text())
+        self.assertEqual(retirement["replacement_status"], "PARTIAL")
+        self.assertFalse(retirement["coverage_verified"])
         self.assertTrue(Path(str((label / "latest").resolve()) + ".partial").is_file())
+        # A partial result is completed: the next plain backup is incremental.
+        snapshot = (label / "latest").resolve()
+        actual_rsync = shutil.which("rsync", path=self.env["PATH"].split(":", 1)[1])
+        wrapper.write_text('#!/bin/bash\n' + shlex.quote(actual_rsync) + ' "$@" || exit $?\nprintf "socket still could not copy\\n" >&2\nexit 23\n')
+        result = self.tms(str(self.parent))
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("Copying incremental backup", result.stdout)
+        self.assertIn("PARTIAL", result.stdout)
+        self.assertIn("socket still could not copy", result.stdout)
+        self.assertNotIn("Copying full backup", result.stdout)
+        latest = (label / "latest").resolve()
+        self.assertNotEqual(latest, snapshot)
+        self.assertTrue((latest / str(self.child).lstrip("/") / "keep.txt").is_file())
+        self.assertTrue((self.child_label / ".retired").is_file())
+        self.assertFalse((label / ".consolidating").exists())
+        self.assertEqual(len([p for p in label.iterdir() if p.is_dir() and not p.is_symlink()]), 2)
+
+    def test_plain_backup_recovers_legacy_partial_pending_state(self):
+        label = self.volume / "backup" / self.parent.name
+        snapshot = label / "2026-01-01T120000.full"
+        snapshot.mkdir(parents=True)
+        (label / ".source").write_text(str(self.parent) + "\n")
+        (label / ".consolidating").write_text(json.dumps({"source": str(self.parent), "snapshot": snapshot.name}))
+        (label / "latest").symlink_to(snapshot)
+        Path(str(snapshot) + ".start").touch()
+        Path(str(snapshot) + ".partial").write_text("rsync_exit=23\n")
+        commands = self.base / "commands"
+        commands.mkdir()
+        actual_rsync = shutil.which("rsync", path=self.env["PATH"])
+        wrapper = commands / "rsync"
+        wrapper.write_text('#!/bin/bash\n' + shlex.quote(actual_rsync) + ' "$@" || exit $?\nprintf "socket warning retained\\n" >&2\nexit 23\n')
+        wrapper.chmod(0o700)
+        self.env["PATH"] = str(commands) + ":" + self.env["PATH"]
+        result = self.tms(str(self.parent))
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("Resuming pending consolidation", result.stdout)
+        self.assertIn("socket warning retained", result.stdout)
+        self.assertIn("PARTIAL", result.stdout)
+        self.assertNotIn("Copying full backup", result.stdout)
+        self.assertEqual((label / "latest").resolve(), snapshot)
+        self.assertFalse((label / ".consolidating").exists())
+        self.assertTrue((self.child_label / ".retired").exists())
 
 
 if __name__ == "__main__":

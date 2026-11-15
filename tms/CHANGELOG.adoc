@@ -1,5 +1,10 @@
 = Changelog
 
+== 1.8.1 — 2026-11-15
+
+* Complete parent consolidation after partial transfers, keeping coverage gaps as warnings and old child histories available. Future normal backups retry missing or changed entries incrementally.
+* Make a plain manual backup automatically resume an existing pending consolidation snapshot, including pending partial attempts from 1.8.0. Preserve batch/service locking behavior. Exclusion rules are unchanged.
+
 == 1.8.0 — 2026-11-15
 
 * Treat rsync exits 23/24 as completed `PARTIAL` snapshots, retain `latest`, and collect transfer warnings at the end of terminal/email reports. Preserve fatal-error handling.

@@ -12,7 +12,7 @@ function tms() {
   fi
   case "$src_dir" in
     ''|-h|--help) usage; return 0 ;;
-    --version) printf 'TimeMachine Simplified 1.8.0\n'; return 0 ;;
+    --version) printf 'TimeMachine Simplified 1.8.1\n'; return 0 ;;
     --scheduler|--swiftbar|--switfbar|--access)
       if [[ $# -gt 2 ]]; then
         printf 'Usage: tms %s [on|off|status] (access: setup|status)\n' "$src_dir" >&2
@@ -74,6 +74,20 @@ function tms() {
   if [[ $# -gt 2 || ( $# -eq 2 && "$full" != full ) ]]; then
     printf 'Usage: tms src_dir [full]\n' >&2
     return 2
+  fi
+
+  # A manual backup of a pending parent continues its recorded consolidation.
+  # Batch/service callers keep their existing skip/locking behavior.
+  if [[ "$full" = no && ${_tms_skip_retired:-no} != yes && ${_tms_service_run:-no} != yes ]]; then
+    local pending_source pending_label
+    pending_source=$(/usr/bin/python3 -B -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "$src_dir") || return 1
+    pending_label="${backup_volume:-/Volumes/Backup}/backup/${pending_source##*/}"
+    if _tms_is_consolidating "$pending_label" && [[ ${_tms_consolidation_parent:-} != "$pending_source" ]]; then
+      printf 'Resuming pending consolidation; reusing the recorded snapshot.\n'
+      backup_volume="${backup_volume:-/Volumes/Backup}" /usr/bin/python3 -B \
+        "$_TMS_SCRIPT_DIR/tms_sources.py" "$pending_source"
+      return $?
+    fi
   fi
 
   # Batch callers own the arrays; standalone calls create a one-row report.
@@ -164,7 +178,7 @@ function _tms_check_overlap() {
       printf '\nTo replace child sources with this parent while keeping their history:\n' >&2
       printf '  Preview: tms --consolidate %q --dry-run\n' "$source" >&2
       printf '  Run:     tms --consolidate %q\n' "$source" >&2
-      printf 'The command checks coverage, creates or resumes the parent snapshot, then retires covered children.\n' >&2
+      printf 'The command checks coverage, creates or resumes the parent snapshot, then retires child sources.\n' >&2
     fi
     return 1
   fi
@@ -594,7 +608,7 @@ function tms_restore() {
 function usage() {
   cat <<EOF
 
-TimeMachine Simplified 1.8.0
+TimeMachine Simplified 1.8.1
 
 Usage:
 backup_volume=/Volumes/Backup

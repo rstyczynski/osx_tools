@@ -1,6 +1,6 @@
 = TimeMachine Simplified (tms)
 
-Version 1.8.0. Bash functions for full and incremental directory backups.
+Version 1.8.1. Bash functions for full and incremental directory backups.
 
 == Setup
 
@@ -83,14 +83,15 @@ the label's `.retired` marker. No snapshots need to be deleted.
 [source,bash]
 ----
 tms --consolidate ~/Documents --dry-run  # Preview children and check exclusion coverage
-tms --consolidate ~/Documents           # Create or resume parent snapshot, then retire covered children
+tms --consolidate ~/Documents           # Create or resume parent snapshot, then retire child sources
 ----
 
 The preview reads current source trees but creates no snapshots or markers.
 Execution checks inclusion under both the child and parent rule contexts,
 creates or resumes a parent snapshot, then checks inclusion again and verifies the
-currently included child entries exist in that snapshot. Only then does it
-write each child's `.retired` marker. Old child snapshots, including retained
+currently included child entries exist in that snapshot. A partial transfer
+completes with warnings for missing entries. It then writes each child's `.retired` marker,
+retaining the old histories for restoration. Old child snapshots, including retained
 source-deleted content, stay in their original labels; they are not merged into
 the new parent snapshot. The usual TMS metadata/consistency limitations still apply;
 this check verifies coverage, not file content hashes or a point-in-time filesystem image.
@@ -105,15 +106,20 @@ any writes. A deleted parent attempt cannot supply data for a resume.
 
 An exclusion gap reports the affected path and rule; adjust rules and preview
 again. Fatal backup or verification failure leaves children active. A partial
-transfer is done with warnings; children retire only when their currently included
-entries exist in the parent. If partial copying leaves a child coverage gap,
-the snapshot remains available, a warning explains the gap, and children stay active.
-A local
-`backup/<parent-label>/.consolidating` marker keeps the attempted parent pending,
+transfer is done with warnings, including any child coverage gaps. The parent
+becomes active, children retire with their histories retained, and the next
+`tms PARENT` backup runs incrementally. Missing entries are retried automatically;
+updated exclusions apply on the next run. A partial result alone never keeps
+consolidation pending. Retirement metadata records the replacement status and
+whether coverage was verified.
+
+A local `backup/<parent-label>/.consolidating` marker keeps the attempted parent pending,
 so it cannot block continued child backups; automatic runs skip it and inventory
-shows `PENDING`. Resume it with the same consolidation command. The marker is
-removed only after parent coverage verification. If retirement marker writing
-is interrupted after verification, some children may already be retired; each
+shows `PENDING`. A plain manual `tms PARENT` automatically resumes the recorded
+snapshot; `tms --consolidate PARENT` also resumes it. This repairs pending partial
+attempts left by 1.8.0 without another full copy. The marker is removed when
+consolidation completes, including completion with partial-transfer warnings. If retirement marker writing
+is interrupted after copying, some children may already be retired; each
 marker records its completed retirement. Rerun consolidation for the remaining
 active children. A failed or interrupted parent attempt may leave an unpublished
 snapshot directory; it is never promoted merely to finish consolidation.
@@ -349,7 +355,7 @@ into that directory, retaining its stored absolute-path tree.
 
 The following metadata behavior and correctness bugs were checked on macOS with
 GNU rsync 3.4.1 on 2026-11-12 using temporary full-backup, restore, and incremental
-cycles. The two correctness bugs remain in version 1.8.0. Version 1.6.0 adds
+cycles. The two correctness bugs remain in version 1.8.1. Version 1.6.0 adds
 policy filtering and captures new included empty directories; it does not repair
 historical metadata or the rsync content quick-check bug.
 

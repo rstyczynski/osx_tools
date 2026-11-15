@@ -198,7 +198,7 @@ def run_backup(arguments):
                 exit_code = 0
             else:
                 tms_args = ["--all"] if arguments == ["--all"] else [arguments[1]]
-                command = ["/bin/bash", "-c", 'source "$1"; shift; tms "$@"', "tms", str(ROOT / "tms.sh")] + tms_args
+                command = ["/bin/bash", "-c", 'source "$1"; _tms_service_run=yes; shift; tms "$@"', "tms", str(ROOT / "tms.sh")] + tms_args
                 with log.open("w") as stream:
                     child = subprocess.Popen(command, env=environment(config), stdout=subprocess.PIPE,
                                              stderr=subprocess.STDOUT, text=True, errors="replace", start_new_session=True)

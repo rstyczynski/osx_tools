@@ -67,10 +67,10 @@ def check_coverage(parent, children, snapshot=None):
             if not included:
                 reason = "%s:%s (%s)" % (rule.origin, rule.line, rule.text) if rule else "parent policy"
                 raise ValueError("Coverage gap: %s is included by child %s but excluded by %s. "
-                                 "Adjust exclusions and preview again; no children retired." % (path, child, reason))
+                                 "Adjust exclusions and preview again." % (path, child, reason))
             if snapshot is not None and not os.path.lexists(snapshot / str(path).lstrip("/")):
                 raise ValueError("Coverage gap: current child entry absent from parent snapshot: %s. "
-                                 "No children retired; retry after source changes stop." % path)
+                                 "Retry to pick up entries that appeared during copying." % path)
 
 
 def atomic_marker(label, record):
@@ -194,18 +194,22 @@ def consolidate(parent, volume, dry_run=False, lock_fd=None):
     if descendants(parent, backup) != children:
         raise ValueError("Active sources changed during copying; no children retired. Preview and retry")
     print("Checking coverage against the completed parent snapshot...", flush=True)
+    coverage_verified = True
     try:
         check_coverage(parent, children, snapshot)
     except ValueError as error:
         if Path(str(snapshot) + ".partial").exists():
-            print("WARNING: backup done (PARTIAL), but child coverage is incomplete: %s" % error)
-            print("Child sources remain active. Retry the same command to resume this snapshot.")
-            return
-        raise
-    # Coverage is verified. The scheduler lock spans parent activation and retirement.
+            coverage_verified = False
+            print("WARNING: backup done (PARTIAL); some child entries were not copied: %s" % error)
+            print("Old child histories are retained. The next normal backup retries missing or changed entries.")
+        else:
+            raise
+    # Partial coverage gaps are warnings. Finish the handoff while holding the lock.
     pending.unlink()
     record = {"replacement": str(parent), "retired_at": dt.datetime.now().astimezone().isoformat(),
-              "replacement_snapshot": snapshot.name}
+              "replacement_snapshot": snapshot.name,
+              "replacement_status": "PARTIAL" if Path(str(snapshot) + ".partial").exists() else "OK",
+              "coverage_verified": coverage_verified}
     for label, child in children.items():
         atomic_marker(label, record)
         print("RETIRED: %s; history retained at %s" % (child, label), flush=True)
