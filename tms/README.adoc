@@ -505,10 +505,31 @@ not rewrite `.bash_profile` or embed a recipient address.
 
 === Native schedule
 
-The per-user LaunchAgent `local.tms.backup` runs at 00:00, 04:00, 08:00, 12:00,
-16:00, and 20:00 in the Mac's local timezone. `StartCalendarInterval` catches up
-once on wake if the machine slept through a scheduled time. The user must be
+The per-user LaunchAgent `local.tms.backup` runs by default at 00:00, 04:00,
+08:00, 12:00, 16:00, and 20:00 in the Mac's local timezone.
+`StartCalendarInterval` catches up once on wake if the machine slept through a scheduled time. The user must be
 logged in; jobs missed while powered off do not catch up. No cron job is used.
+
+Set `schedule_hours` in the general TMS configuration, `~/.config/tms/config.json`,
+to choose the daily run hours. For example, merge this field into your existing
+JSON object, preserving `backup_volume`, `mail_from`, and any other settings:
+
+[source,json]
+----
+"schedule_hours": [0, 4, 8, 12, 16, 20]
+----
+
+Use a nonempty array of unique integer hours from 0 through 23; each run starts
+at minute 00 in local time. Order does not matter. If the field is absent, the
+six default hours above apply, preserving existing installations. New configuration
+files include the default field. Invalid values are rejected before the active
+job is changed. To disable automatic backups, use `tms --scheduler off`.
+
+After editing, run `tms --scheduler on` to apply the hours, then
+`tms --scheduler status` to verify them. Editing the JSON alone does not change
+the loaded schedule. Status and the SwiftBar menu report the installed launchd
+schedule. The plist is generated; direct edits are overwritten on the next `on`.
+SwiftBar's one-minute menu refresh is independent of these backup hours.
 
 `tms --scheduler on` builds the helper if needed, writes the LaunchAgent,
 enables it, and loads it without immediately starting a backup. `off` persists

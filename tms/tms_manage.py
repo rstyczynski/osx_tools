@@ -15,7 +15,7 @@ import time
 ROOT = Path(__file__).resolve().parent
 HOME = Path.home()
 LABEL = "local.tms.backup"
-HOURS = tuple(range(0, 24, 4))
+DEFAULT_SCHEDULE_HOURS = tuple(range(0, 24, 4))
 
 
 def command(args, check=False):
@@ -31,6 +31,19 @@ def domain():
 
 def agent_path():
     return HOME / "Library/LaunchAgents" / (LABEL + ".plist")
+
+
+def schedule_hours():
+    path = HOME / ".config/tms/config.json"
+    config = json.loads(path.read_text()) if path.exists() else {}
+    if not isinstance(config, dict):
+        raise RuntimeError("TMS configuration must be a JSON object: " + str(path))
+    hours = config.get("schedule_hours", list(DEFAULT_SCHEDULE_HOURS))
+    if (not isinstance(hours, list) or not hours
+            or any(type(hour) is not int or not 0 <= hour <= 23 for hour in hours)
+            or len(set(hours)) != len(hours)):
+        raise RuntimeError("schedule_hours must be a nonempty list of unique integer hours (0–23) in " + str(path))
+    return sorted(hours)
 
 
 def helper_path():
@@ -50,7 +63,8 @@ def prepare():
         pass  # Preserve the user's central policy, including an intentionally empty file.
     config = HOME / ".config/tms/config.json"
     if not config.exists():
-        data = {"backup_volume": os.environ.get("TMS_BACKUP_VOLUME") or os.environ.get("backup_volume") or "/Volumes/Backup"}
+        data = {"backup_volume": os.environ.get("TMS_BACKUP_VOLUME") or os.environ.get("backup_volume") or "/Volumes/Backup",
+                "schedule_hours": list(DEFAULT_SCHEDULE_HOURS)}
         if os.environ.get("TMS_REPORT_EMAIL"):
             data["mail_from"] = os.environ["TMS_REPORT_EMAIL"]
         config.write_text(json.dumps(data, indent=2) + "\n")
@@ -142,11 +156,12 @@ def scheduler(action):
             agent_path().write_bytes(plistlib.dumps(job))
         print("Scheduler disabled. Snapshots, logs, configuration, and SwiftBar are retained.")
     elif action == "on":
+        hours = schedule_hours()  # Validate before changing the helper or active job.
         binary = build_helper()
         path = agent_path()
         path.parent.mkdir(parents=True, exist_ok=True)
         job = {"Label": LABEL, "ProgramArguments": [str(binary), "--all"],
-               "StartCalendarInterval": [{"Hour": h, "Minute": 0} for h in HOURS],
+               "StartCalendarInterval": [{"Hour": h, "Minute": 0} for h in hours],
                "RunAtLoad": False, "Disabled": False, "ProcessType": "Background", "Nice": 10,
                "LowPriorityIO": True, "Umask": 63, "EnvironmentVariables": {"HOME": str(HOME)},
                "StandardOutPath": str(HOME / "Library/Logs/tms/launchd.log"),

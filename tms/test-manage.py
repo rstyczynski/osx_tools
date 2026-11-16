@@ -80,6 +80,60 @@ class ManagementTest(unittest.TestCase):
             self.assertEqual(state["next"], "none")
             self.assertTrue(plistlib.loads(manage.agent_path().read_bytes())["Disabled"])
 
+    def write_config(self, data):
+        path = self.home / ".config/tms/config.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(data))
+        return path
+
+    def test_scheduler_applies_configured_hours_and_reloads(self):
+        path = self.write_config({"backup_volume": "/Volumes/custom", "schedule_hours": [22, 7, 13]})
+        original = path.read_text()
+        self.quiet(manage.scheduler, "on")
+        job = plistlib.loads(manage.agent_path().read_bytes())
+        self.assertEqual(job["StartCalendarInterval"], [
+            {"Hour": h, "Minute": 0} for h in (7, 13, 22)])
+        self.assertEqual(manage.scheduler_info()["hours"], [7, 13, 22])
+        self.assertEqual(path.read_text(), original)
+        self.write_config({"schedule_hours": [0, 23]})
+        self.assertEqual(manage.scheduler_info()["hours"], [7, 13, 22])
+        self.quiet(manage.scheduler, "on")
+        self.assertEqual(manage.scheduler_info()["hours"], [0, 23])
+
+    def test_existing_config_without_hours_uses_defaults(self):
+        path = self.write_config({"backup_volume": "/Volumes/custom", "mail_from": "user@example.com"})
+        original = path.read_text()
+        self.quiet(manage.scheduler, "on")
+        self.assertEqual(manage.scheduler_info()["hours"], [0, 4, 8, 12, 16, 20])
+        self.assertEqual(path.read_text(), original)
+
+    def test_invalid_hours_preserve_loaded_job(self):
+        self.quiet(manage.scheduler, "on")
+        original = manage.agent_path().read_bytes()
+        invalid = ([], [24], [-1], [True], [3.5], ["4"], [4, 4], "4", None, {}, [[1]])
+        for hours in invalid:
+            with self.subTest(hours=hours):
+                self.write_config({"schedule_hours": hours})
+                self.calls.clear()
+                with self.assertRaisesRegex(RuntimeError, "schedule_hours"):
+                    self.quiet(manage.scheduler, "on")
+                self.assertTrue(self.loaded)
+                self.assertEqual(manage.agent_path().read_bytes(), original)
+                self.assertTrue(all(call[1] in ("print", "print-disabled") for call in self.calls))
+        path = self.write_config({})
+        for content in ('{', '[]'):
+            with self.subTest(content=content):
+                path.write_text(content)
+                self.calls.clear()
+                with self.assertRaises((ValueError, RuntimeError)):
+                    self.quiet(manage.scheduler, "on")
+                self.assertEqual(manage.agent_path().read_bytes(), original)
+                self.assertTrue(all(call[1] in ("print", "print-disabled") for call in self.calls))
+        # Broken settings must not prevent inspecting or disabling the scheduler.
+        self.quiet(manage.scheduler, "status")
+        self.quiet(manage.scheduler, "off")
+        self.assertFalse(self.loaded)
+
     def test_swiftbar_independent_and_owned_link_only(self):
         self.quiet(manage.swiftbar, "on")
         self.assertEqual(manage.plugin_path().resolve(), manage.ROOT / "tms.1m.sh")
@@ -100,6 +154,8 @@ class ManagementTest(unittest.TestCase):
 
     def test_central_policy_created_once_and_user_edits_preserved(self):
         manage.prepare()
+        config = json.loads((self.home / ".config/tms/config.json").read_text())
+        self.assertEqual(config["schedule_hours"], [0, 4, 8, 12, 16, 20])
         policy = self.home / ".config/tms/excludes"
         self.assertIn(".models/", policy.read_text())
         policy.write_text("")
