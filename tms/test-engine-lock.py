@@ -46,9 +46,9 @@ class EngineLockTest(unittest.TestCase):
                                "tms-test", str(ROOT / "tms.sh"), *args],
                               env=env or self.env, pass_fds=pass_fds, text=True, capture_output=True, timeout=10)
 
-    def start_holder(self, service=False):
+    def start_holder(self, service=False, hardlink=False):
         env = dict(self.env)
-        env["BASH_FUNC_rsync%%"] = '() { printf "%s\\n" "$$" > "$TMS_TEST_WORKER_PID"; sleep 120; }'
+        env["BASH_FUNC_gcp%%" if hardlink else "BASH_FUNC_rsync%%"] = '() { printf "%s\\n" "$$" > "$TMS_TEST_WORKER_PID"; sleep 120; }'
         self.output = (self.base / "holder-output").open("w")
         if service:
             command = [sys.executable, "-B", str(ROOT / "tms-service.py"), "run", "--source", str(self.source)]
@@ -110,6 +110,47 @@ class EngineLockTest(unittest.TestCase):
         self.stop_holder()
         result = self.invoke(str(self.other))
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_hardlink_phase_and_terminal_completion(self):
+        result = self.invoke(str(self.source))
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        finished = json.loads(self.invoke("--status", "--json").stdout)
+        self.assertFalse(finished["active"])
+        self.assertEqual(finished["status"], "OK")
+        self.assertEqual(finished["phase"], "DONE")
+        self.assertIn("FINAL BACKUP REPORT", Path(finished["log"]).read_text())
+        time.sleep(1)
+        self.start_holder(hardlink=True)
+        state = json.loads(self.invoke("--status", "--json").stdout)
+        self.assertEqual(state["phase"], "CREATE HARDLINK")
+        self.assertIsNone(state["percent"])
+        self.assertIsNone(state["estimated_bytes"])
+
+    def test_shared_live_status_and_busy_log_for_terminal_and_service(self):
+        for service_run in (False, True):
+            with self.subTest(service=service_run):
+                self.worker.unlink(missing_ok=True)
+                self.start_holder(service=service_run)
+                result = self.invoke("--status", "--json")
+                self.assertEqual(result.returncode, 0, result.stderr)
+                live = json.loads(result.stdout)
+                self.assertTrue(live["active"])
+                self.assertEqual(live["phase"], "COPY")
+                self.assertEqual(live["source"], str(self.source))
+                self.assertEqual(live["estimated_bytes"], len("fixture"))
+                self.assertTrue(Path(live["log"]).is_file())
+                cli = self.invoke("--status").stdout
+                blocked = self.invoke(str(self.other))
+                self.assertEqual(blocked.returncode, 75)
+                self.assertIn(cli.strip(), blocked.stderr)
+                self.assertIn("Current log: " + live["log"], blocked.stderr)
+                menu = subprocess.run([sys.executable, "-B", str(ROOT / "tms-service.py"), "menu"],
+                                      env=self.env, text=True, capture_output=True, timeout=10)
+                self.assertEqual(menu.returncode, 0, menu.stderr)
+                for line in cli.strip().splitlines():
+                    self.assertIn(line, menu.stdout)
+                self.assertIn("Open current backup log", menu.stdout)
+                self.stop_holder()
 
     def test_service_blocks_plain_and_full_terminal_backups(self):
         self.start_holder(service=True)

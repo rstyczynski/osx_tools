@@ -130,6 +130,8 @@ def prepare(source, snapshot, incremental=False, marker=None, resume=False):
     policy = Policy(source)
     threshold = Path(marker).stat().st_mtime_ns if incremental else None
     excluded, manifest = set(), {source}
+    estimated_bytes = 0
+    estimate_complete = True
     mirror = snapshot / str(source).lstrip("/")
     for path, info in walk(source):
         directory = stat.S_ISDIR(info.st_mode)
@@ -144,6 +146,12 @@ def prepare(source, snapshot, incremental=False, marker=None, resume=False):
         selected = (not incremental or missing or path.name == ".tmsignore"
                     or stat.S_ISLNK(info.st_mode) or (not directory and info.st_ctime_ns > threshold))
         if selected:
+            # The manifest already determines this source's copy input; no second scan.
+            if stat.S_ISREG(info.st_mode):
+                estimated_bytes += info.st_size
+            elif stat.S_ISLNK(info.st_mode):
+                # rsync --copy-links follows links, whose targets this scan does not walk.
+                estimate_complete = False
             manifest.add(path)
             manifest.update(parent for parent in path.parents if parent == source or source in parent.parents)
     removed = 0
@@ -172,7 +180,8 @@ def prepare(source, snapshot, incremental=False, marker=None, resume=False):
             stream.write(os.fsencode(path) + b"\x00")
     record = {"source": str(source), "central_path": str(policy.central),
               "configurations": list(policy.records.values()), "excluded_files": len(excluded),
-              "removed_from_new_snapshot": removed, "manifest_entries": len(manifest)}
+              "removed_from_new_snapshot": removed, "manifest_entries": len(manifest),
+              "estimated_bytes": estimated_bytes if estimate_complete else None}
     sidecar = Path(str(snapshot) + ".rules.json")
     sidecar.write_text(json.dumps(record, indent=2) + "\n")
     sidecar.chmod(0o600)

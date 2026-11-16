@@ -12,6 +12,7 @@ import signal
 import socket
 import subprocess
 import sys
+from tms_status import snapshot, status_lines, update as update_progress
 from tms_manage import scheduler_description
 from tms_lock import EngineBusy, engine_lock, inherited_lock, FD_ENV
 
@@ -348,6 +349,7 @@ def run_locked_backup(config, arguments, lock_fd):
     except (OSError, subprocess.SubprocessError, KeyError):
         pass
     save_state(config, state)
+    update_progress(state_dir, lock_fd=lock_fd, log=str(log))
     child = None
 
     def interrupted(signum, frame):
@@ -422,6 +424,7 @@ def run_locked_backup(config, arguments, lock_fd):
         state["email"] = "FAILED: " + str(error)
         print(state["email"], file=sys.stderr)
     save_state(config, state)
+    update_progress(state_dir, lock_fd=lock_fd, status=state["status"], phase="DONE" if not exit_code else "FAILED")
     return 1 if exit_code or state["email"].startswith("FAILED") else 0
 
 
@@ -443,19 +446,27 @@ def menu():
     managed_active = (active and state.get("status") == "RUNNING"
                       and owner.get("kind", "service") == "service"
                       and owner.get("pid", state.get("pid")) == state.get("pid"))
-    email_failed = state.get("email", "").startswith("FAILED")
-    status = "RUNNING" if managed_active else "RUNNING (" + owner.get("kind", "engine") + ")" if active else state.get("status", "Not run yet")
+    live = snapshot(config["state_dir"], running=active)
+    email_failed = live.get("email", "").startswith("FAILED")
+    status = "RUNNING" if managed_active else "RUNNING (" + owner.get("kind", "engine") + ")" if active else live.get("status", "Not run yet")
     if status == "RUNNING" and not active:
         status = "INTERRUPTED"
     icon = "↻" if active else ("■" if status == "STOPPED" else "!" if email_failed or status in ("FAILED", "INTERRUPTED") else "⚠" if status == "PARTIAL" else "✓" if status == "OK" else "—")
-    print("TMS " + icon)
+    headline = "TMS " + icon
+    if active:
+        headline += " " + live.get("phase", "START")
+        if live.get("phase") == "COPY" and live.get("percent") is not None:
+            headline += " " + str(live["percent"]) + "%"
+    print(headline)
     print("---")
-    timestamp = owner.get("started", "engine lock held") if active and not managed_active else state.get("finished", state.get("started", ""))
+    timestamp = owner.get("started", "engine lock held") if active and not managed_active else live.get("finished", live.get("started", ""))
     print(display(status + " · " + timestamp))
+    for line in status_lines(live):
+        print(display(line))
     print(display(scheduler_description()))
     print(display("Destination: " + config["backup_volume"]))
-    if state.get("email"):
-        print(display("Email: " + state["email"]))
+    if live.get("email"):
+        print(display("Email: " + live["email"]))
     action = " | bash=/usr/bin/python3 param1=" + shlex.quote(str(ROOT / "tms-service.py")) + " param2=start param3="
     print("---")
     print("Back up all now" + action + "--all terminal=false refresh=true")
@@ -484,9 +495,9 @@ def menu():
         else:
             print("--Original source unknown; cannot back up")
     print("---")
-    if managed_active and state.get("log"):
-        print("Open current backup log · started " + display(state.get("started", "unknown time"))
-              + " | bash=/usr/bin/open param1=" + shlex.quote(state["log"]) + " terminal=false")
+    if active and live.get("log"):
+        print("Open current backup log · started " + display(live.get("started", "unknown time"))
+              + " | bash=/usr/bin/open param1=" + shlex.quote(live["log"]) + " terminal=false")
     completed = completed_report(config)
     if completed:
         summary, title = completed

@@ -4,7 +4,7 @@
 
 TimeMachine Simplified is a file backup tool. Supports full and incremental copies, with a final report showing one row per source.
 
-Version 1.8.5. See link:tms/README.adoc[the tms README] and link:tms/CHANGELOG.adoc[changelog].
+Version 1.8.6. See link:tms/README.adoc[the tms README] and link:tms/CHANGELOG.adoc[changelog].
 
 === Features
 
@@ -16,7 +16,8 @@ Version 1.8.5. See link:tms/README.adoc[the tms README] and link:tms/CHANGELOG.a
 * *Read-only source estimates* with included/excluded sizes and counts, plus JSON output for agents.
 * *Source inventory* showing state, size, file count, and last backup using `tms --sources`.
 * *Per-source reports* showing status, changed files, duration, and snapshot details.
-* *Native macOS scheduling* every four hours, with catch-up after sleep and on/off/status controls.
+* *Native macOS scheduling* with configurable daily hours (every four hours by default), with catch-up after sleep and on/off/status controls.
+* *Shared CLI and SwiftBar live status* with backup phases, current-source copy progress, estimated bytes, and the active log path.
 * *SwiftBar integration* showing status and backup-now actions for all or individual sources.
 * *Formatted email summaries* with aligned Courier tables and scheduler information.
 * *Snapshot restore* to a separate destination.
@@ -35,6 +36,7 @@ backup_volume=/Volumes/Backup
 tms src_dir [full]
 tms --all          # Back up existing sources discovered at the destination
 tms --sources      # List source state, size, files, and last successful backup
+tms --status [--json]  # Current phase, copy progress, estimated bytes, and log
 tms --estimate /candidate/source [--json]
 tms --consolidate /parent/source [--dry-run]
 tms --explain /path/to/file --source /backup/source
@@ -45,7 +47,7 @@ tms --version
 ```
 
 After updating, reload `tms.sh` in every existing terminal and check `tms --version`
-(current release: `1.8.5`). Already-loaded shell functions retain their previous
+(current release: `1.8.6`). Already-loaded shell functions retain their previous
 code until reloaded. SwiftBar's `RUNNING (terminal)` status refers to the same
 terminal-started job, which holds the shared engine lock.
 
@@ -64,4 +66,4 @@ Target backup volume file systems supports hard links.
 * Restore copies the stored snapshot and absolute-path tree into a new destination.
 
 See link:tms/README.adoc#limitations[the verified limitations and known correctness bugs]
-for details. The two correctness bugs remain present in version 1.8.5.
+for details. The two correctness bugs remain present in version 1.8.6.

@@ -1,6 +1,6 @@
 = TimeMachine Simplified (tms)
 
-Version 1.8.5. Bash functions for full and incremental directory backups.
+Version 1.8.6. Bash functions for full and incremental directory backups.
 
 == Setup
 
@@ -80,10 +80,10 @@ source ~/projects/osx_tools/tms/tms.sh
 tms --version
 ----
 
-For this release the version must be `TimeMachine Simplified 1.8.5`.
+For this release the version must be `TimeMachine Simplified 1.8.6`.
 Updating files on disk leaves older function definitions in an already-open
 shell unchanged. For example, a shell still reporting 1.7.0 has no engine lock,
-even when scheduled/menu runs use the installed 1.8.5 files. Verify the loaded
+even when scheduled/menu runs use the installed 1.8.6 files. Verify the loaded
 version before starting another backup. New shells load the version referenced
 by their startup configuration.
 
@@ -386,7 +386,7 @@ into that directory, retaining its stored absolute-path tree.
 
 The following metadata behavior and correctness bugs were checked on macOS with
 GNU rsync 3.4.1 on 2026-11-12 using temporary full-backup, restore, and incremental
-cycles. The two correctness bugs remain in version 1.8.5. Version 1.6.0 adds
+cycles. The two correctness bugs remain in version 1.8.6. Version 1.6.0 adds
 policy filtering and captures new included empty directories; it does not repair
 historical metadata or the rsync content quick-check bug.
 
@@ -619,11 +619,48 @@ For an explicit setup email without running backups:
 ~/Applications/"TMS Backup.app"/Contents/MacOS/TMSBackup --test-email
 ----
 
-=== Menu and logs
+=== Live status, menu, and logs
+
+[source,bash]
+----
+source ~/projects/osx_tools/tms/tms.sh
+tms --status                 # Read-only; works while any backup holds the lock
+tms --status --json          # Same live state for scripts
+----
+
+The CLI and SwiftBar read the same engine-owned `progress.json` in
+`~/Library/Application Support/tms` (or `TMS_STATE_DIR`). Each run starts at
+`START`, enters `INIT` for setup/discovery, uses `CREATE HARDLINK` while cloning
+an incremental baseline, then enters `COPY`. Full backups skip hard-link creation;
+discovery after linking returns to `INIT`. Each subsequent source resets progress.
+The active source, copy percentage, estimated logical input bytes, and current
+log path appear in both interfaces. Completion reports `OK`, `PARTIAL`, or
+`FAILED`; a vanished lock with unfinished state reports `INTERRUPTED`.
+
+Both full and incremental copies use rsync's aggregate `progress2` output.
+Percentages and processed bytes describe the current source's copy phase, not
+hard-link creation, the whole batch, or network upload completion. The input
+estimate comes from the exclusion-aware manifest scan, without a second walk.
+It is an estimate of selected logical file bytes, not extra disk space or exact
+bytes transferred. Symlink targets are not sized by that scan; when they occur,
+the amount is initially calculating and is inferred from rsync once a nonzero
+percentage is available. rsync may revise its progress as it checks files.
+Progress is unavailable during setup and hard linking; no artificial percentage
+is shown. The shared state updates at most twice per second during transfer,
+plus the final progress record; SwiftBar displays it on its normal refresh.
+
+Every new terminal backup prints and saves its current log under
+`~/Library/Logs/tms` (or `TMS_LOG_DIR`), while still streaming output to the
+terminal. Service jobs retain their existing logs. A competing `tms SOURCE`
+continues to exit 75 before snapshot changes and now also prints the shared
+status and `Current log:` path. Use `tail -f` with that path to follow it.
+A run already active during this update keeps its existing log; status can
+recover its phase from that log, but copy percentages require a new run.
+
 
 SwiftBar refreshes every minute. It shows running/success/partial/failure state, last-run
 time, actual scheduler status, mail status, destination, and last-backup timestamps.
-Use *Back up all now* or a source's *Back up now* submenu. While a service job is
+Use *Back up all now* or a source's *Back up now* submenu. While any backup job is
 running, *Open current backup log* opens its current log. *Last completed report*
 shows the report origin (`terminal` or `service`) and completion time and opens
 the timestamped report file, so an older edited `last-summary.txt` window cannot
@@ -674,6 +711,10 @@ after coordinator death, and release after the final fixture worker exits.
 it stops only a temporary backup fixture, checks an unrelated fixture survives,
 and verifies lock release and retained working snapshot data. It needs permission
 to inspect and signal its own test processes.
+
+`python3 -B test-status.py` tests shared state, stale-owner handling, and streamed
+carriage-return progress parsing. `python3 -B test-engine-lock.py` also verifies
+CLI/SwiftBar status parity and live-log discovery for terminal and service runs.
 
 `python3 -B test-manage.py` tests independent on/off/status transitions and
 background-check cleanup with mocked macOS commands. `python3 -B test-service.py`

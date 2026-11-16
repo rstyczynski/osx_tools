@@ -5,7 +5,7 @@ _TMS_SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 function tms() {
   case "${1:-}" in
-    ''|-h|--help|--version|--sources|--estimate|--explain|--scheduler|--swiftbar|--switfbar|--access)
+    ''|-h|--help|--version|--sources|--status|--estimate|--explain|--scheduler|--swiftbar|--switfbar|--access)
       _tms_main "$@"; return $? ;;
     --consolidate)
       if [[ ${3:-} = --dry-run && $# = 3 ]]; then
@@ -40,12 +40,12 @@ function _tms_main() {
   local src_dir="${1:-}"
   local full="${2:-no}"
 
-  if [[ "$src_dir" != --estimate ]]; then
+  if [[ "$src_dir" != --estimate && "$src_dir" != --status ]]; then
     printf 'backup_volume=%s\n' "${backup_volume:-/Volumes/Backup}"
   fi
   case "$src_dir" in
     ''|-h|--help) usage; return 0 ;;
-    --version) printf 'TimeMachine Simplified 1.8.5\n'; return 0 ;;
+    --version) printf 'TimeMachine Simplified 1.8.6\n'; return 0 ;;
     --scheduler|--swiftbar|--switfbar|--access)
       if [[ $# -gt 2 ]]; then
         printf 'Usage: tms %s [on|off|status] (access: setup|status)\n' "$src_dir" >&2
@@ -55,6 +55,14 @@ function _tms_main() {
       [[ "$feature" = switfbar ]] && feature=swiftbar
       TMS_BACKUP_VOLUME="${backup_volume:-${TMS_BACKUP_VOLUME:-}}" /usr/bin/python3 \
         "$_TMS_SCRIPT_DIR/tms_manage.py" "$feature" "${2:-status}"
+      return $?
+      ;;
+    --status)
+      if [[ $# -gt 2 || ( $# -eq 2 && "${2:-}" != --json ) ]]; then
+        printf 'Usage: tms --status [--json]\n' >&2
+        return 2
+      fi
+      /usr/bin/python3 -B "$_TMS_SCRIPT_DIR/tms_status.py" "${@:2}"
       return $?
       ;;
     --estimate)
@@ -224,6 +232,7 @@ function _tms_backup_source() {
     printf '%s\n' "$_tms_result_detail" >&2
     return 1
   fi
+  /usr/bin/python3 -B "$_TMS_SCRIPT_DIR/tms_status.py" phase INIT "$src_dir"
   _tms_source_header "$src_dir"
   # Resolve aliases even if the source is now missing: retirement still applies.
   src_dir=$(/usr/bin/python3 -B -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "$src_dir") || return 1
@@ -321,10 +330,12 @@ function _tms_backup_source() {
   local latest_marker=
   if [[ "$backup_type" != full && "$resuming" != yes ]]; then
     latest_marker="$(realpath "$backup_dir/latest").start"
+    /usr/bin/python3 -B "$_TMS_SCRIPT_DIR/tms_status.py" phase "CREATE HARDLINK" "$src_dir"
     echo "Creating hard links..."
     gcp -al "$backup_dir/latest/." "$backup_dst/" || return 1
   fi
 
+  /usr/bin/python3 -B "$_TMS_SCRIPT_DIR/tms_status.py" phase INIT "$src_dir"
   echo "Applying exclusion rules and discovering files..."
   local policy_args=(prepare "$src_dir" "$backup_dst")
   [[ -n "$latest_marker" ]] && policy_args+=(--marker "$latest_marker")
@@ -337,8 +348,8 @@ function _tms_backup_source() {
   # Backup files
   #
   _tms_result_detail='Copy failed (see output)'
-  local progress_option=--progress
-  [[ "$backup_type" = full ]] && progress_option=--info=progress2
+  local progress_option=--info=progress2
+  /usr/bin/python3 -B "$_TMS_SCRIPT_DIR/tms_status.py" phase COPY "$src_dir" "$backup_dst.rules.json"
   if [[ "$resuming" = yes ]]; then
     echo 'Resuming transfer; files already present are checked and reused...'
   else
@@ -346,8 +357,9 @@ function _tms_backup_source() {
   fi
   # Keep progress visible and retain the exact transfer statistics for reporting.
   _tms_result_warning_log="$backup_dst.warnings"
+  : > "$backup_dst.stats" || return 1
   LC_ALL=C rsync -a --copy-links "$progress_option" --stats \
-    --from0 --files-from="$backup_dst.files0" / "$backup_dst" 2>"$_tms_result_warning_log" | tee "$backup_dst.stats"
+    --from0 --files-from="$backup_dst.files0" / "$backup_dst" 2>"$_tms_result_warning_log" | /usr/bin/python3 -B "$_TMS_SCRIPT_DIR/tms_status.py" copy "$backup_dst.stats"
   local copy_status=("${PIPESTATUS[@]}")
   local transferred
   transferred=$(awk '/^Number of regular files transferred:/ {gsub(/,/, "", $NF); print $NF}' "$backup_dst.stats")
@@ -661,7 +673,7 @@ function tms_restore() {
 function usage() {
   cat <<EOF
 
-TimeMachine Simplified 1.8.5
+TimeMachine Simplified 1.8.6
 
 Usage:
 backup_volume=/Volumes/Backup
@@ -669,6 +681,7 @@ tms src_dir [full]
 tms --all
 tms --sources
 tms --estimate SOURCE [--json]
+tms --status [--json]
 tms --consolidate PARENT [--dry-run]
 tms --explain PATH [--source ROOT]
 tms --scheduler on|off|status

@@ -73,6 +73,7 @@ awk '/FINAL BACKUP REPORT/ {report=NR} /file could not be copied/ {warning=NR} E
 partial_snapshot=$(readlink "$backup_volume/backup/source two/latest")
 test -f "$partial_snapshot.partial"
 grep -q 'file could not be copied' "$partial_snapshot.warnings"
+tms --status --json | python3 -c 'import json,sys; state=json.load(sys.stdin); assert state["status"] == "PARTIAL" and not state["active"], state'
 unset -f rsync
 # File-config batches share one final report, including failed sources.
 sleep 1
@@ -138,7 +139,7 @@ grep -q 'Sources: 0' "$fixture/output"
 # Bare invocation and informational options must not start backups.
 tms > "$fixture/output"
 grep -q 'With no arguments' "$fixture/output"
-tms --version | grep -q '1.8.5'
+tms --version | grep -q '1.8.6'
 tms --help > "$fixture/output"
 if tms --unknown > "$fixture/output" 2>&1; then exit 1; fi
 if tms --all extra > "$fixture/output" 2>&1; then exit 1; fi

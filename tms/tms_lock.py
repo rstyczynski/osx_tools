@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+from tms_status import begin, update, snapshot, status_lines
 
 ROOT = Path(__file__).resolve().parent
 FD_ENV = "TMS_ENGINE_LOCK_FD"
@@ -55,6 +56,7 @@ def engine_lock(state_dir=None, kind="terminal"):
         temporary = state_dir / ("engine-owner." + str(os.getpid()) + ".tmp")
         temporary.write_text(json.dumps(owner) + "\n")
         temporary.replace(state_dir / "engine-owner.json")
+        begin(state_dir, owner)
         # Close only. Explicit LOCK_UN would also unlock inherited worker copies.
         yield lock.fileno()
 
@@ -71,11 +73,42 @@ def main():
             env = dict(os.environ, **{FD_ENV: str(fd)})
             function = "tms" if mode == "tms" else "tms_batch"
             command = 'source "$1"; shift; ' + function + ' "$@"'
-            result = subprocess.run(["/bin/bash", "-c", command, "tms-engine", str(ROOT / "tms.sh"), *arguments],
-                                    env=env, pass_fds=(fd,))
-            return result.returncode if result.returncode >= 0 else 128 - result.returncode
+            log_dir = Path(os.environ.get("TMS_LOG_DIR", Path.home() / "Library/Logs/tms"))
+            log_dir.mkdir(parents=True, exist_ok=True)
+            log = log_dir / (dt.datetime.now().strftime("%Y-%m-%dT%H%M%S") + "-" + str(os.getpid()) + "-terminal.log")
+            update(lock_fd=fd, log=str(log))
+            print("Current log: " + str(log), flush=True)
+            with log.open("wb") as stream:
+                child = subprocess.Popen(["/bin/bash", "-c", command, "tms-engine", str(ROOT / "tms.sh"), *arguments],
+                                         env=env, pass_fds=(fd,), stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+                try:
+                    while True:
+                        chunk = os.read(child.stdout.fileno(), 65536)
+                        if not chunk:
+                            break
+                        stream.write(chunk)
+                        stream.flush()
+                        sys.stdout.buffer.write(chunk)
+                        sys.stdout.buffer.flush()
+                    code = child.wait()
+                except KeyboardInterrupt:
+                    update(lock_fd=fd, status="INTERRUPTED", phase="INTERRUPTED")
+                    raise
+                finally:
+                    child.stdout.close()
+            code = code if code >= 0 else 128 - code
+            # A partial source is a successful command with warnings.
+            with log.open("rb") as stream:
+                stream.seek(0, 2)
+                stream.seek(max(0, stream.tell() - 65536))
+                partial = any(len(parts) > 1 and parts[1].strip() == b"PARTIAL"
+                              for parts in (line.split(b"|") for line in stream.read().splitlines()))
+            status = "FAILED" if code else "PARTIAL" if partial else "OK"
+            update(lock_fd=fd, status=status, phase="DONE" if not code else "FAILED")
+            return code
     except EngineBusy as error:
         print("Error: " + str(error), file=sys.stderr)
+        print("\n".join(status_lines(snapshot())), file=sys.stderr)
         return 75
     except KeyboardInterrupt:
         return 130
