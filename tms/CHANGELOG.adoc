@@ -1,5 +1,11 @@
 = Changelog
 
+== 1.9.0 — 2026-11-16
+
+* Prepare Spotlight-excluded storage automatically in `tms.sh` before snapshot writes: use `backup.noindex` and retain `backup` as a relative compatibility symlink. Migrate an existing archive by renaming its container without recopying snapshot data.
+* Run preparation under the engine lock; refuse conflicting archives/unexpected symlinks and roll back the rename if the compatibility link cannot be created. Preserve existing snapshot paths and normalize resumed snapshot comparisons across the alias.
+* Add temporary-archive checks for fresh setup, idempotence, preserved file inodes/latest links, conflicts, and rollback.
+
 == 1.8.6 — 2026-11-16
 
 * Share engine-owned live status across SwiftBar, `tms --status [--json]`, and busy CLI responses: START, INIT, CREATE HARDLINK, and COPY with current-source percentage and estimated amount.

@@ -1,6 +1,6 @@
 = TimeMachine Simplified (tms)
 
-Version 1.8.6. Bash functions for full and incremental directory backups.
+Version 1.9.0. Bash functions for full and incremental directory backups.
 
 == Setup
 
@@ -80,10 +80,10 @@ source ~/projects/osx_tools/tms/tms.sh
 tms --version
 ----
 
-For this release the version must be `TimeMachine Simplified 1.8.6`.
+For this release the version must be `TimeMachine Simplified 1.9.0`.
 Updating files on disk leaves older function definitions in an already-open
 shell unchanged. For example, a shell still reporting 1.7.0 has no engine lock,
-even when scheduled/menu runs use the installed 1.8.6 files. Verify the loaded
+even when scheduled/menu runs use the installed 1.9.0 files. Verify the loaded
 version before starting another backup. New shells load the version referenced
 by their startup configuration.
 
@@ -356,7 +356,25 @@ activate it in unrelated projects. No particular agent vendor or model is requir
 
 == Destination layout and discovery
 
-Snapshots live in `backup_volume/backup/<source-basename>/<timestamp>[.full]`.
+`tms.sh` automatically prepares `backup_volume/backup.noindex` before creating
+or linking snapshots, while holding the engine lock. The `.noindex` directory
+name excludes the stored tree from Spotlight's filesystem indexing. A
+`.metadata_never_index` marker is also created as an additional hint; TMS does
+not rely on that marker alone or change volume-wide Spotlight settings.
+
+An existing `backup_volume/backup` directory is renamed once to
+`backup_volume/backup.noindex`; its files and hard links are not recopied.
+`backup_volume/backup` becomes a relative symlink to `backup.noindex`, so existing
+commands, restore paths, and absolute historical `latest` links remain usable.
+If both real archive directories exist, TMS refuses to merge them. If creating
+the compatibility link fails, it restores the original directory name.
+Preparation is automatic on the next backup after reloading `tms.sh`; no separate
+setup command or System Settings automation is required. Read-only commands do
+not migrate storage. Existing Spotlight results may take time to disappear.
+
+Snapshots are physically stored in
+`backup_volume/backup.noindex/<source-basename>/<timestamp>[.full]`, also reachable
+through the compatible `backup_volume/backup/...` path.
 Each snapshot preserves the absolute source path below its root.
 `latest` points to the last successful snapshot. Failed copies do not advance it.
 Snapshots created within the same second cannot overwrite an existing snapshot.
@@ -386,7 +404,7 @@ into that directory, retaining its stored absolute-path tree.
 
 The following metadata behavior and correctness bugs were checked on macOS with
 GNU rsync 3.4.1 on 2026-11-12 using temporary full-backup, restore, and incremental
-cycles. The two correctness bugs remain in version 1.8.6. Version 1.6.0 adds
+cycles. The two correctness bugs remain in version 1.9.0. Version 1.6.0 adds
 policy filtering and captures new included empty directories; it does not repair
 historical metadata or the rsync content quick-check bug.
 

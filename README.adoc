@@ -4,10 +4,11 @@
 
 TimeMachine Simplified is a file backup tool. Supports full and incremental copies, with a final report showing one row per source.
 
-Version 1.8.6. See link:tms/README.adoc[the tms README] and link:tms/CHANGELOG.adoc[changelog].
+Version 1.9.0. See link:tms/README.adoc[the tms README] and link:tms/CHANGELOG.adoc[changelog].
 
 === Features
 
+* *Automatic Spotlight exclusion* using `backup.noindex` storage, with existing `backup` paths preserved through a compatibility symlink.
 * *Full and incremental backups*, with timestamped snapshots and hard links.
 * *Parent consolidation* with overlap detection, resumable transfers, and destination-local retirement metadata that preserves child histories.
 * *Partial completion* reported as done with warnings, with transfer diagnostics at the end.
@@ -47,7 +48,7 @@ tms --version
 ```
 
 After updating, reload `tms.sh` in every existing terminal and check `tms --version`
-(current release: `1.8.6`). Already-loaded shell functions retain their previous
+(current release: `1.9.0`). Already-loaded shell functions retain their previous
 code until reloaded. SwiftBar's `RUNNING (terminal)` status refers to the same
 terminal-started job, which holds the shared engine lock.
 
@@ -66,4 +67,4 @@ Target backup volume file systems supports hard links.
 * Restore copies the stored snapshot and absolute-path tree into a new destination.
 
 See link:tms/README.adoc#limitations[the verified limitations and known correctness bugs]
-for details. The two correctness bugs remain present in version 1.8.6.
+for details. The two correctness bugs remain present in version 1.9.0.

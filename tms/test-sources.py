@@ -166,7 +166,7 @@ class ConsolidationTest(unittest.TestCase):
         self.assertIn("Resuming pending consolidation", result.stdout)
         self.assertIn("Resuming existing snapshot", result.stdout)
         self.assertNotIn("Copying full backup", result.stdout)
-        self.assertEqual((label / "latest").resolve(), snapshot)
+        self.assertEqual((label / "latest").resolve(), snapshot.resolve())
         self.assertEqual(copied.stat().st_ino, previous_inode)
         self.assertEqual(sorted(path.name for path in label.iterdir() if path.is_dir() and not path.is_symlink()), before)
         self.assertFalse((snapshot / str(transient).lstrip("/")).exists())
@@ -246,7 +246,7 @@ class ConsolidationTest(unittest.TestCase):
         self.assertIn("socket warning retained", result.stdout)
         self.assertIn("PARTIAL", result.stdout)
         self.assertNotIn("Copying full backup", result.stdout)
-        self.assertEqual((label / "latest").resolve(), snapshot)
+        self.assertEqual((label / "latest").resolve(), snapshot.resolve())
         self.assertFalse((label / ".consolidating").exists())
         self.assertTrue((self.child_label / ".retired").exists())
 

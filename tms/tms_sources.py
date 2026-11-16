@@ -192,7 +192,7 @@ def consolidate(parent, volume, dry_run=False, lock_fd=None):
         pass_fds=() if lock_fd is None else (lock_fd,))
     if result.returncode:
         raise ValueError("Parent backup failed. No children retired; existing child backups remain active")
-    if (parent_label / "latest").resolve(strict=True) != snapshot or not snapshot.is_dir():
+    if (parent_label / "latest").resolve(strict=True) != snapshot.resolve() or not snapshot.is_dir():
         raise ValueError("Cannot verify completed parent snapshot; no children retired")
     if descendants(parent, backup) != children:
         raise ValueError("Active sources changed during copying; no children retired. Preview and retry")

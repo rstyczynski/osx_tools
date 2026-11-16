@@ -45,7 +45,7 @@ function _tms_main() {
   fi
   case "$src_dir" in
     ''|-h|--help) usage; return 0 ;;
-    --version) printf 'TimeMachine Simplified 1.8.6\n'; return 0 ;;
+    --version) printf 'TimeMachine Simplified 1.9.0\n'; return 0 ;;
     --scheduler|--swiftbar|--switfbar|--access)
       if [[ $# -gt 2 ]]; then
         printf 'Usage: tms %s [on|off|status] (access: setup|status)\n' "$src_dir" >&2
@@ -172,6 +172,45 @@ function _tms_is_consolidating() {
   [[ -e "$1/.consolidating" || -L "$1/.consolidating" ]]
 }
 
+function _tms_prepare_backup_root() {
+  # Run only inside the engine mutex, before creating/linking any snapshot.
+  /usr/bin/python3 -B "$_TMS_SCRIPT_DIR/tms_lock.py" check || return 1
+  local volume="${backup_volume:-/Volumes/Backup}" legacy target actual
+  legacy="$volume/backup"
+  target="$volume/backup.noindex"
+  if [[ -L "$legacy" ]]; then
+    actual=$(/usr/bin/python3 -B -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$legacy") || return 1
+    if [[ ! -d "$target" || -L "$target" || "$actual" != "$(cd "$target" && pwd -P)" ]]; then
+      printf 'Error: backup symlink does not point to the TMS backup.noindex directory: %s\n' "$legacy" >&2
+      return 1
+    fi
+  elif [[ -e "$legacy" ]]; then
+    if [[ ! -d "$legacy" || -e "$target" || -L "$target" ]]; then
+      printf 'Error: cannot safely migrate backup to backup.noindex; conflicting paths at %s\n' "$volume" >&2
+      return 1
+    fi
+    printf 'Spotlight: moving existing archive directory to %s\n' "$target"
+    mv "$legacy" "$target" || return 1
+    if ! ln -s backup.noindex "$legacy"; then
+      printf 'Error: cannot create backup compatibility link; restoring original directory.\n' >&2
+      mv "$target" "$legacy" || printf 'Error: rollback failed; existing backups remain at %s\n' "$target" >&2
+      return 1
+    fi
+    printf 'Spotlight: migrated backup storage to %s (backup remains a compatibility link).\n' "$target"
+  else
+    [[ ! -L "$target" ]] || { printf 'Error: backup.noindex must not be a symlink.\n' >&2; return 1; }
+    mkdir -p "$target" || return 1
+    ln -s backup.noindex "$legacy" || return 1
+    printf 'Spotlight: backup storage is %s\n' "$target"
+  fi
+  # Retain the conventional marker as an additional hint; .noindex is the path policy.
+  if [[ -L "$target/.metadata_never_index" || ( -e "$target/.metadata_never_index" && ! -f "$target/.metadata_never_index" ) ]]; then
+    printf 'Error: unsafe Spotlight marker at %s\n' "$target/.metadata_never_index" >&2
+    return 1
+  fi
+  [[ -e "$target/.metadata_never_index" ]] || touch "$target/.metadata_never_index" || return 1
+}
+
 function _tms_retired_detail() {
   /usr/bin/python3 -B - "$1/.retired" <<'PY'
 import json
@@ -273,6 +312,9 @@ function _tms_backup_source() {
     echo "Error: gcp (GNU cp from coreutils) is not installed. Install it with 'brew install coreutils'."
     return 1
   fi
+  _tms_result_detail='Cannot prepare Spotlight-excluded backup storage'
+  _tms_prepare_backup_root || return 1
+  backup_dir="$(cd "${backup_volume:-/Volumes/Backup}/backup" && pwd -P)/$(basename "$src_dir")"
 
   #
   # Wait for backup restore_destination to be available (e.g., external disk)
@@ -298,7 +340,7 @@ function _tms_backup_source() {
 
   local resuming=no
   if [[ ${_tms_consolidation_parent:-} = "$src_dir" && -n ${_tms_resume_snapshot:-} ]]; then
-    backup_dst=$_tms_resume_snapshot
+    backup_dst=$(/usr/bin/python3 -B -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$_tms_resume_snapshot") || return 1
     if [[ "${backup_dst%/*}" != "$backup_dir" || -L "$backup_dst" ]]; then
       _tms_result_detail='Invalid consolidation snapshot path'
       return 1
@@ -673,7 +715,7 @@ function tms_restore() {
 function usage() {
   cat <<EOF
 
-TimeMachine Simplified 1.8.6
+TimeMachine Simplified 1.9.0
 
 Usage:
 backup_volume=/Volumes/Backup
